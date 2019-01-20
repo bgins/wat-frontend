@@ -21,12 +21,11 @@ runTest :: String -> IO ()
 runTest inputFile = do
     putStrLn $ id inputFile
     text <- readFile $ "tests/tokens/" ++ inputFile
-    putStr "  "
     print text
-    putStr "  "  -- does not print nicely for errors
     case Parsec.parse lex inputFile text of
         Left err  -> print err
         Right x   -> print x
+    putStr "\n"
 
 
 
@@ -40,6 +39,7 @@ data Token = Keyword String
            | Id String
            | OpenParen
            | CloseParen
+           | Reserved String
 
 
 instance Show Token where
@@ -50,6 +50,7 @@ instance Show Token where
     show (Id ident) = id ident
     show OpenParen = show '('
     show CloseParen = show ')'
+    show (Reserved r) = id r
 
 
 
@@ -71,9 +72,20 @@ token = do
         , identifier
         , openParen
         , closeParen
+        , reserved
         ]
     Parsec.spaces
     return token
+
+
+
+-- KEYWORDS
+
+
+keyword :: Parsec.Parsec String () Token
+keyword = do
+    kw <- Parsec.choice $ map (Parsec.try . Parsec.string) Keywords.keywords
+    return (Keyword kw)
 
 
 
@@ -212,9 +224,19 @@ betweenQuotes =
 identifier :: Parsec.Parsec String () Token
 identifier = do
     marker <- Parsec.char '$'
-    name <- Parsec.many1 $ Parsec.satisfy Char.isAscii
+    name <- Parsec.many1 $ Parsec.oneOf idChar
     return (Id (marker:name))
 
+
+idChar :: String
+idChar =
+    concat
+        [ ['0'..'9']
+        , ['A'..'Z']
+        , ['a'..'z']
+        , [ '!', '#', '$', '%', '&', '′', '*', '+', '-', '.', '/'
+          , ':', '<', '=', '>', '?', '@', '\\', '^', '_', '`', '|', '~']
+        ]
 
 
 -- PARENS
@@ -233,10 +255,10 @@ closeParen = do
 
 
 
--- KEYWORDS
+-- RESERVED
 
 
-keyword :: Parsec.Parsec String () Token
-keyword = do
-    kw <- Parsec.choice $ map (Parsec.try . Parsec.string) Keywords.keywords
-    return (Keyword kw)
+reserved :: Parsec.Parsec String () Token
+reserved = do
+    r <- Parsec.many1 Parsec.anyChar
+    return (Reserved r)
