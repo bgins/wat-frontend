@@ -1,9 +1,11 @@
 module Keywords ( keywords ) where
 
+import Data.List
+
 
 keywords :: [String]
 keywords =
-    concat
+    reverse $ sort $ concat
         [ types 
         , instructions
         , modules
