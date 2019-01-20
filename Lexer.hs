@@ -149,24 +149,56 @@ string = do
 
 stringElement :: Parsec.Parsec String () String
 stringElement = do
-    elem <- escapeSequence <|> stringChar
+    elem <- stringCharacter <|> escapeSequence
     return elem
 
 
--- TODO: Add raw bytes and additional unicode characters
+stringCharacter :: Parsec.Parsec String () String
+stringCharacter = do
+    char <- Parsec.satisfy (\c -> c /= '\\' && c /= '\"' && not (isControl c))
+    return [char]
+
+
 escapeSequence :: Parsec.Parsec String () String
 escapeSequence = do
     escape <- Parsec.char '\\'
-    char <- Parsec.oneOf "tnr\"`\\"
-    return [escape, char]
+    cs <- Parsec.choice
+        [ escapeCharacter
+        , rawByte
+        , unicodeCharacter
+        ]
+    return (escape:cs)
 
 
--- TODO: Prohibit U+7F and <= U+20?
-stringChar :: Parsec.Parsec String () String
-stringChar = do
-    char <- Parsec.noneOf "\\\""
-    return [char]
+escapeCharacter :: Parsec.Parsec String () String
+escapeCharacter = do
+    c <- Parsec.oneOf "tnr\"`\\"
+    return [c]
 
+
+rawByte :: Parsec.Parsec String () String
+rawByte = do
+    n <- Parsec.hexDigit
+    m <- Parsec.hexDigit
+    Parsec.lookAhead (Parsec.oneOf "\" ")
+    return [n, m]
+
+
+unicodeCharacter :: Parsec.Parsec String () String
+unicodeCharacter = do
+    hds <- Parsec.between (Parsec.string "u{") (Parsec.string "}") (digits Parsec.hexDigit)
+    cs <- unicodeHexString hds
+    return ("u{" ++ cs ++ "}")
+
+
+unicodeHexString :: [Int] -> Parsec.Parsec String () String
+unicodeHexString hds
+    | val < 55296                   = return hexString   -- n < 0xD800
+    | 57344 <= val && val < 1114112 = return hexString   -- 0xE000 <= n < 0x110000
+    | otherwise = Parsec.unexpected $ "Invalid unicode charater \"u{" ++ hexString ++ "}\" in string"
+      where val = fromDigits 16 hds
+            hexString = map intToDigit hds
+ 
 
 betweenQuotes :: Parsec.Parsec String () String -> Parsec.Parsec String () String
 betweenQuotes =
