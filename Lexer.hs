@@ -107,21 +107,34 @@ negativeInteger = do
 
 hexnum :: Parsec.Parsec String () Int
 hexnum = do
-    Parsec.string "0x"
-    n <- removeUnderscores <$> Parsec.many1 (Parsec.hexDigit <|> Parsec.char '_')
-    return (fst $ head $ readHex n)
+    Parsec.try (Parsec.string "0x")
+    hds <- digits Parsec.hexDigit
+    return (fromDigits 16 hds)
 
 
 num :: Parsec.Parsec String () Int
 num = do
-    n <- removeUnderscores <$> Parsec.many1 (Parsec.digit <|> Parsec.char '_')
-    return (read n :: Int)
+  ds <- digits Parsec.digit
+  return (fromDigits 10 ds)
 
 
-removeUnderscores :: String -> String
-removeUnderscores =
-    filter (not . (`elem` "_" ))
+digits :: Parsec.Parsec String () Char -> Parsec.Parsec String () [Int]
+digits digitParser = do
+    d <- digitToInt <$> digitParser
+    ds <- Parsec.many (digit digitParser)
+    return (d:ds)
 
+
+digit :: Parsec.Parsec String () Char -> Parsec.Parsec String () Int
+digit digitParser = do
+    Parsec.optional (Parsec.char '_')
+    d <- digitToInt <$> digitParser
+    return d
+
+
+fromDigits :: Int -> [Int] -> Int
+fromDigits base ds =
+    foldl (\num d -> base*num + d) 0 ds
 
 
 
