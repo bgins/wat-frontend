@@ -1,3 +1,4 @@
+import Control.Monad (void)
 import Data.Char as Char
 import Numeric (readHex)
 import Prelude hiding (lex)
@@ -59,7 +60,15 @@ instance Show Token where
 
 lex :: Parsec.Parsec String () [Token]
 lex = do
-    Parsec.manyTill token Parsec.eof
+    Parsec.optional whitespace
+    ts <- tokens
+    Parsec.eof
+    return ts
+
+
+tokens :: Parsec.Parsec String () [Token]
+tokens = do
+    Parsec.sepEndBy token whitespace
 
 
 token :: Parsec.Parsec String () Token
@@ -74,9 +83,25 @@ token = do
         , closeParen
         , reserved
         ]
-    Parsec.spaces
     return token
 
+
+whitespace :: Parsec.Parsec String () ()
+whitespace = do
+    Parsec.many $ space <|> format <|> Parsec.try comment
+    return ()
+
+
+space :: Parsec.Parsec String () String
+space = do
+    c <- Parsec.char ' '
+    return [c]
+
+
+format :: Parsec.Parsec String () String
+format = do
+    c <- Parsec.oneOf "\t\n\r"
+    return [c]
 
 
 -- KEYWORDS
@@ -210,7 +235,7 @@ unicodeHexString hds
     | otherwise = Parsec.unexpected $ "Invalid unicode charater \"u{" ++ hexString ++ "}\" in string"
       where val = fromDigits 16 hds
             hexString = map intToDigit hds
- 
+
 
 betweenQuotes :: Parsec.Parsec String () String -> Parsec.Parsec String () String
 betweenQuotes =
@@ -224,7 +249,7 @@ betweenQuotes =
 identifier :: Parsec.Parsec String () Token
 identifier = do
     marker <- Parsec.char '$'
-    name <- Parsec.many1 $ Parsec.oneOf idChar
+    name <- Parsec.many1 (Parsec.oneOf idChar)
     return (Id (marker:name))
 
 
@@ -262,3 +287,59 @@ reserved :: Parsec.Parsec String () Token
 reserved = do
     r <- Parsec.many1 Parsec.anyChar
     return (Reserved r)
+
+
+
+-- COMMENTS
+
+
+comment :: Parsec.Parsec String () String
+comment = do
+    lineComment <|> blockComment
+
+
+lineComment :: Parsec.Parsec String () String
+lineComment = do
+    Parsec.string ";; "
+    lc <- Parsec.manyTill Parsec.anyChar eol
+    return lc
+
+
+eol :: Parsec.Parsec String () ()
+eol = do
+     void Parsec.newline <|> Parsec.eof
+
+
+blockComment :: Parsec.Parsec String () String
+blockComment = do
+    bc <- inBlockComment (concat <$> Parsec.many (Parsec.try blockComment <|> blockChar))
+    return bc
+
+
+blockChar :: Parsec.Parsec String () String
+blockChar = do
+    c <- Parsec.choice
+        [ Parsec.try (Parsec.noneOf ";)")
+        , Parsec.try blockCharSemi
+        , Parsec.try blockCharOpenParen
+        ]
+    return [c]
+
+
+blockCharSemi :: Parsec.Parsec String () Char
+blockCharSemi = do
+    Parsec.char ';'
+    Parsec.notFollowedBy (Parsec.char ')')
+    return ';'
+
+
+blockCharOpenParen :: Parsec.Parsec String () Char
+blockCharOpenParen = do
+    Parsec.char '('
+    Parsec.notFollowedBy (Parsec.char ';')
+    return '('
+
+
+inBlockComment :: Parsec.Parsec String () String -> Parsec.Parsec String () String
+inBlockComment = do
+    Parsec.between (Parsec.string "(;") (Parsec.string ";)")

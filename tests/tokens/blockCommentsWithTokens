@@ -1,0 +1,6 @@
+(; comment ;)
+module (; another
+comment ;)
+42
+(; and (; a nested one ;)
+for good measure ;)

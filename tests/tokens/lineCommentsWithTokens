@@ -1,0 +1,4 @@
+;; comment
+module      ;; another comment
+42
+;; final comments
