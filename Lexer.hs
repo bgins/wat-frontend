@@ -285,7 +285,7 @@ closeParen = do
 
 reserved :: Parsec.Parsec String () Token
 reserved = do
-    r <- Parsec.many1 Parsec.anyChar
+    r <- Parsec.many1 (Parsec.oneOf idChar)
     return (Reserved r)
 
 
