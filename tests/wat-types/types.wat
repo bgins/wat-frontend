@@ -1,0 +1,11 @@
+(module
+  (type (func))
+  (type (func (param i32)))
+  (type (func (result i32)))
+  (type (func (param i32) (result i32)))
+  (type (func (param i32) (param i32) (result i64)))
+  (type (func (param i64) (result i32) (result i32)))
+  (type (func (param i32) (param i64) (result f32) (result f64)))
+  (type $typeId (func (param i32) (result i32)))
+  (type $typeId (func (param $paramId i32) (result i32)))
+)

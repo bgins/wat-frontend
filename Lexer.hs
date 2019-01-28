@@ -1,3 +1,5 @@
+module Lexer where
+
 import Control.Monad (void)
 import Data.Char as Char
 import Numeric (readHex)
@@ -14,15 +16,15 @@ import Keywords
 
 main :: IO ()
 main = do
-    tests <- listDirectory "tests/tokens"
+    tests <- listDirectory "tests/wat"
     mapM_ runTest tests
 
 
 runTest :: String -> IO ()
 runTest inputFile = do
     putStrLn $ id inputFile
-    text <- readFile $ "tests/tokens/" ++ inputFile
-    print text
+    text <- readFile $ "tests/wat/" ++ inputFile
+    -- print text
     case Parsec.parse lex inputFile text of
         Left err  -> print err
         Right x   -> print x
@@ -44,14 +46,14 @@ data Token = Keyword String
 
 
 instance Show Token where
-    show (Keyword kw) = id kw
+    show (Keyword kw) = kw
     show (UIntLit n) = show n
     show (SIntLit n) = show n
     show (StringLit str) = show str
-    show (Id ident) = id ident
+    show (Id ident) = ident
     show OpenParen = show '('
     show CloseParen = show ')'
-    show (Reserved r) = id r
+    show (Reserved r) = r
 
 
 
