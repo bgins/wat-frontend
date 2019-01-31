@@ -1,27 +1,29 @@
-import Lexer hiding (main, runTest)
-import Prelude hiding (lex)
+module Parser where
+
+import Lexer hiding (runTest)
 import System.Directory
 import qualified Text.Parsec as Parsec
 import Text.Parsec ((<|>))
   
 
--- MAIN
+
+-- TEST
 
 
-main :: IO ()
-main = do
-    tests <- listDirectory "tests/wat-types"
-    mapM_ runTest tests
+testParser :: String ->  IO ()
+testParser testDirectory = do
+    tests <- listDirectory testDirectory
+    mapM_ (runTest testDirectory) tests
 
-  
-runTest :: String -> IO ()
-runTest inputFile = do
+
+runTest :: String -> String -> IO ()
+runTest testDirectory inputFile = do
     putStrLn inputFile
-    text <- readFile $ "tests/wat-types/" ++ inputFile
+    text <- readFile $ testDirectory ++ "/" ++ inputFile
     putStrLn text
     case Parsec.parse parse inputFile text of
         Left err  -> print err
-        Right m   -> print m
+        Right m   -> indentOut m
     putStr "\n"
 
 
@@ -44,10 +46,6 @@ parse = do
 
 data Module = Module Components
 
-instance Show Module where
-    show (Module components) = "module\n" ++ showComponents 1 components
-
-
 wasmModule :: Parsec.Parsec String () Module
 wasmModule = do
     kw <- Parsec.lookAhead closeParen <|> keyword
@@ -56,7 +54,7 @@ wasmModule = do
             Parsec.optional whitespace
             cs <- components
             return (Module cs)
-        CloseParen       -> return (Module (Components []))
+        CloseParen       -> return (Module (Components [] []))
         _                -> failStartsWithOrEmpty "module" "module" kw
 
     
@@ -64,30 +62,48 @@ wasmModule = do
 -- COMPONENTS
 
 
-data Components = Components { types :: [Component] }
+data Components = Components { types :: [Component]
+                             , funcs :: [Component]
+                             }
 
 data Component = Type (Maybe Ident) FuncType
+               -- | Func (Maybe Ident) (Maybe TypeUse) [Param] [Result] [Local] [Instruction]
+               | Func (Maybe Ident) (Maybe TypeUse) [Param] [Result]
 
 components :: Parsec.Parsec String () Components
 components = do
-    ts <- Parsec.sepEndBy component whitespace  -- only types possible now, fix and sort for many component types
-    return (Components ts)
+    cs <- Parsec.sepEndBy (betweenParens component) whitespace 
+    -- sort these components out
+    return (Components cs [])
     
 
 component :: Parsec.Parsec String () Component
 component = do
-    c <- betweenParens $ Parsec.choice [ wasmType ] 
-    return c
+    kw <- keyword
+    case kw of
+        Keyword "type" -> do
+            Parsec.optional whitespace
+            id <- Parsec.optionMaybe identifier
+            Parsec.optional whitespace
+            ft <- betweenParens funcType
+            return (Type (identify id) ft)
+        Keyword "func" -> do
+            Parsec.optional whitespace
+            id <- Parsec.optionMaybe identifier
+            Parsec.optional whitespace
+            typeuse <- Parsec.optionMaybe $ Parsec.try (betweenParens typeUse)
+            Parsec.optional whitespace
+            ps <- Parsec.sepEndBy (Parsec.try $ betweenParens param) whitespace
+            Parsec.optional whitespace
+            rs <- Parsec.sepEndBy (betweenParens result) whitespace
+            return (Func (identify id) typeuse ps rs)
+        _              -> failStartsWith "component" "type or func" kw
+
 
 
 
 -- TYPES
 
-
-data ValType = I32
-             | I64
-             | F32
-             | F64
 
 data FuncType = FuncType [Param] [Result]
 
@@ -97,25 +113,17 @@ data Result = Result ValType
 
 data Ident = Ident String
 
+data ValType = I32
+             | I64
+             | F32
+             | F64
+
   
 identify :: Maybe Token -> Maybe Ident
 identify id =
     case id of
         Just (Id id) -> Just (Ident id)
         Nothing      -> Nothing
-
-
-wasmType :: Parsec.Parsec String () Component
-wasmType = do
-    kw <- keyword
-    case kw of
-        Keyword "type" -> do
-            Parsec.optional whitespace
-            id <- Parsec.optionMaybe identifier
-            Parsec.optional whitespace
-            ft <- betweenParens funcType
-            return (Type (identify id) ft)
-        _              -> failStartsWith "type component" "type" kw
 
 
 funcType :: Parsec.Parsec String () FuncType
@@ -175,6 +183,116 @@ betweenParens =
     Parsec.between (Parsec.char '(') (Parsec.char ')')
 
 
+-- TYPE USE
+
+
+data TypeUse = TypeUse (Either Int Ident)
+
+typeUse :: Parsec.Parsec String () TypeUse
+typeUse = do
+    kw <- keyword
+    case kw of
+        Keyword "type" -> do
+            whitespace
+            typeidx <- Parsec.try unsignedInteger <|> identifier
+            case typeidx of
+                UIntLit n -> return (TypeUse (Left n))  -- TODO: check this is u32
+                Id id     -> return (TypeUse (Right (Ident id)))  -- TODO: check for it in identifier context
+        _             -> failStartsWith "type use" "type" kw
+
+
+-- TREE REPRESENTATION
+
+
+data Tree = Node String [Tree]
+          | Leaf String
+
+class ToTree a where toTree :: a -> Tree
+
+instance ToTree Module where
+    toTree (Module components) = Node "module" [toTree components]
+
+instance ToTree Components where
+    toTree (Components types funcs) = Node "components" $ map toTree types
+
+instance ToTree Component where
+    toTree (Type id functype) =
+        Node "type" $ case id of
+                          Just id -> [toTree id, toTree functype]
+                          Nothing -> [toTree functype]
+    toTree (Func id typeuse params results) =
+        Node "func" $ case id of
+                          Just id -> [toTree id]
+                                ++ case typeuse of
+                                       Just typeuse -> [toTree typeuse]
+                                                           ++ map toTree params
+                                                           ++ map toTree results
+                                       Nothing      -> map toTree params
+                                                           ++ map toTree results
+                          Nothing -> case typeuse of
+                                         Just typeuse -> [toTree typeuse]
+                                                             ++ map toTree params
+                                                             ++ map toTree results
+                                         Nothing      -> map toTree params
+                                                             ++ map toTree results
+
+
+instance ToTree FuncType where
+    toTree (FuncType params results) = Node "functype" $ map toTree params ++ map toTree results
+
+instance ToTree Param where
+    toTree (Param id valtype) =
+        Node "param" $ case id of
+            Just id -> [toTree id, toTree valtype]
+            Nothing -> [toTree valtype]
+
+instance ToTree Result where
+    toTree (Result valtype) = Node "result" [toTree valtype]
+
+instance ToTree Ident where
+    toTree (Ident id) = Leaf id
+
+instance ToTree ValType where
+    toTree I32 = Leaf "i32"
+    toTree I64 = Leaf "i64"
+    toTree F32 = Leaf "f32"
+    toTree F64 = Leaf "f64"
+
+instance ToTree Int where
+    toTree n = Leaf (show n)
+
+instance ToTree TypeUse where
+    toTree (TypeUse typeidx) =
+        Node "typuse" $ case typeidx of
+                            Left n -> [toTree n]
+                            Right id -> [toTree id]
+
+
+
+-- SHOW
+
+indentTree :: Int -> Tree -> IO ()
+indentTree n tree =
+    case tree of
+        Node str children -> do
+            putStrLn $ indent n ++ str
+            mapM_ (indentTree (n+1)) children
+        Leaf str          -> do
+            putStrLn $ indent n ++ str
+        -- Leaf str          -> do
+            -- putStr $ " " ++ str ++ " "
+
+
+indentOut :: ToTree a => a -> IO ()
+indentOut =
+      (indentTree 0) . toTree
+
+
+indent :: Int -> String
+indent n =
+    concat (replicate n "  ")
+
+
 
 -- ERRORS
 
@@ -191,67 +309,3 @@ failStartsWithOrEmpty production expected actual =
                         \ or be empty, but I am seeing \"" ++ (show actual) ++ "\""
 
 
-
--- SHOW
-
-
-showComponents :: Int -> Components -> String
-showComponents n components =
-    indent n ++ "components\n"
-        ++ concat (map (\c -> showComponent (n + 1) c) (types components))
-
-  
-showComponent :: Int -> Component -> String
-showComponent n component =
-    indent n  
-        ++ case component of
-               Type ident functype -> "type "
-                                    ++ showMaybeIdent ident
-                                    ++ "\n"
-                                    ++ showFuncType (n + 1) functype
-
-
-showValType :: ValType -> String
-showValType valtype =
-    case valtype of
-        I32 -> "i32"
-        I64 -> "i64"
-        F32 -> "f32"
-        F64 -> "f64"
-
-
-showFuncType :: Int -> FuncType -> String
-showFuncType n functype =
-    indent n ++ "functype\n"
-        ++ case functype of
-               FuncType params results -> concat (map (\c -> showParam (n + 1) c ++ "\n") params)
-                                              ++ concat (map (\c -> showResult (n + 1) c ++ "\n") results)
-
-showParam :: Int -> Param -> String
-showParam n param =
-    indent n ++ "param "
-        ++ case param of
-               Param id valtype -> showMaybeIdent id ++ showValType valtype
-
-
-showResult :: Int -> Result -> String
-showResult n result =
-    indent n ++ "result "
-        ++ case result of
-               Result valtype -> showValType valtype
-
-
-instance Show Ident where
-    show (Ident id) = id
-
-
-showMaybeIdent :: Maybe Ident -> String
-showMaybeIdent ident =
-    case ident of
-        Just id -> show id ++ " "
-        Nothing -> ""
-
-
-indent :: Int -> String
-indent n =
-    concat (replicate n "  ")

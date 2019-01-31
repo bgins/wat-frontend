@@ -11,19 +11,19 @@ import System.Directory
 import Keywords
 
 
--- MAIN
+-- TEST
 
 
-main :: IO ()
-main = do
-    tests <- listDirectory "tests/wat"
-    mapM_ runTest tests
+testLexer :: String -> IO ()
+testLexer testDirectory = do
+    tests <- listDirectory testDirectory 
+    mapM_ (runTest testDirectory) tests
 
 
-runTest :: String -> IO ()
-runTest inputFile = do
+runTest :: String -> String -> IO ()
+runTest testDirectory inputFile = do
     putStrLn $ id inputFile
-    text <- readFile $ "tests/wat/" ++ inputFile
+    text <- readFile $ testDirectory ++ "/" ++ inputFile
     -- print text
     case Parsec.parse lex inputFile text of
         Left err  -> print err
