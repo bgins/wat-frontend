@@ -40,11 +40,18 @@ parse = do
     return m 
 
 
+betweenParens :: Parsec.Parsec String () a -> Parsec.Parsec String () a
+betweenParens =
+    Parsec.between (Parsec.char '(') (Parsec.char ')')
+
 
 -- MODULE
 
 
 data Module = Module Components
+
+-- data Module a = Module Components a
+-- type ParserId = Either Ident Int
 
 wasmModule :: Parsec.Parsec String () Module
 wasmModule = do
@@ -54,7 +61,7 @@ wasmModule = do
             Parsec.optional whitespace
             cs <- components
             return (Module cs)
-        CloseParen       -> return (Module (Components [] []))
+        CloseParen       -> return (Module [])
         _                -> failStartsWithOrEmpty "module" "module" kw
 
     
@@ -62,19 +69,16 @@ wasmModule = do
 -- COMPONENTS
 
 
-data Components = Components { types :: [Component]
-                             , funcs :: [Component]
-                             }
+type Components = [Component]
 
-data Component = Type (Maybe Ident) FuncType
-               -- | Func (Maybe Ident) (Maybe TypeUse) [Param] [Result] [Local] [Instruction]
-               | Func (Maybe Ident) (Maybe TypeUse) [Param] [Result]
+data Component = Type MaybeIdent FuncType
+               -- | Func MaybeIdent TypeUse Locals Instructions
+               | Func MaybeIdent TypeUse
 
 components :: Parsec.Parsec String () Components
 components = do
     cs <- Parsec.sepEndBy (betweenParens component) whitespace 
-    -- sort these components out
-    return (Components cs [])
+    return cs
     
 
 component :: Parsec.Parsec String () Component
@@ -91,12 +95,8 @@ component = do
             Parsec.optional whitespace
             id <- Parsec.optionMaybe identifier
             Parsec.optional whitespace
-            typeuse <- Parsec.optionMaybe $ Parsec.try (betweenParens typeUse)
-            Parsec.optional whitespace
-            ps <- Parsec.sepEndBy (Parsec.try $ betweenParens param) whitespace
-            Parsec.optional whitespace
-            rs <- Parsec.sepEndBy (betweenParens result) whitespace
-            return (Func (identify id) typeuse ps rs)
+            typeuse <- typeUse
+            return (Func (identify id) typeuse)
         _              -> failStartsWith "component" "type or func" kw
 
 
@@ -105,18 +105,24 @@ component = do
 -- TYPES
 
 
-data FuncType = FuncType [Param] [Result]
+data FuncType = FuncType Params Results
 
-data Param = Param (Maybe Ident) ValType
+type Params = [Param]
 
-data Result = Result ValType
+data Param = Param MaybeIdent ValType deriving (Eq)
 
-data Ident = Ident String
+type Results = [Result]
+
+data Result = Result ValType deriving (Eq)
+
+data Ident = Ident String deriving (Eq)
+
+type MaybeIdent = Maybe Ident
 
 data ValType = I32
              | I64
              | F32
-             | F64
+             | F64 deriving (Eq)
 
   
 identify :: Maybe Token -> Maybe Ident
@@ -173,32 +179,52 @@ valType = do
         Keyword "i64" -> return I64
         Keyword "f32" -> return F32
         Keyword "f64" -> return F64
-        _               -> Parsec.unexpected $
-                                ": A value type must be \"i32\", \"i64\", \"f32\", or \"f64\" keyword\
-                                \ but I am seeing \"" ++ (show kw) ++ "\""
+        _             -> Parsec.unexpected $
+                             ": A value type must be \"i32\", \"i64\", \"f32\", or \"f64\" keyword\
+                             \ but I am seeing \"" ++ (show kw) ++ "\""
 
   
-betweenParens :: Parsec.Parsec String () a -> Parsec.Parsec String () a
-betweenParens =
-    Parsec.between (Parsec.char '(') (Parsec.char ')')
-
 
 -- TYPE USE
 
 
-data TypeUse = TypeUse (Either Int Ident)
+type TypeIdX = Either Int Ident
+
+data TypeUse = TypeUse TypeIdX
+             | TypeUseWithDeclarations TypeIdX Params Results
+             | InlineType Params Results
 
 typeUse :: Parsec.Parsec String () TypeUse
 typeUse = do
+    typeidx <- Parsec.optionMaybe $ Parsec.try (betweenParens typeRef)
+    Parsec.optional whitespace
+    ps <- Parsec.sepEndBy (Parsec.try $ betweenParens param) whitespace
+    Parsec.optional whitespace
+    rs <- Parsec.sepEndBy (betweenParens result) whitespace
+    case typeidx of
+        Just typeidx -> if ps == [] && rs == [] then
+                            return (TypeUse typeidx)
+                        else
+                            return (TypeUseWithDeclarations typeidx ps rs)
+        Nothing      -> if ps /= [] || rs /= [] then
+                            return (InlineType ps rs)
+                        else
+                            Parsec.unexpected $ "A func component must have have a type reference\
+                                                   \ or an inline type signature"
+
+
+typeRef :: Parsec.Parsec String () TypeIdX
+typeRef = do
     kw <- keyword
     case kw of
         Keyword "type" -> do
             whitespace
             typeidx <- Parsec.try unsignedInteger <|> identifier
             case typeidx of
-                UIntLit n -> return (TypeUse (Left n))  -- TODO: check this is u32
-                Id id     -> return (TypeUse (Right (Ident id)))  -- TODO: check for it in identifier context
-        _             -> failStartsWith "type use" "type" kw
+                UIntLit n -> return (Left n)  -- TODO: check this is u32
+                Id id     -> return (Right (Ident id))  -- TODO: check for it in identifier context
+        _              -> failStartsWith "type use" "type" kw
+
 
 
 -- TREE REPRESENTATION
@@ -210,35 +236,22 @@ data Tree = Node String [Tree]
 class ToTree a where toTree :: a -> Tree
 
 instance ToTree Module where
-    toTree (Module components) = Node "module" [toTree components]
-
-instance ToTree Components where
-    toTree (Components types funcs) = Node "components" $ map toTree types
+    toTree (Module components) =
+        Node "module" $ map toTree components
 
 instance ToTree Component where
     toTree (Type id functype) =
         Node "type" $ case id of
                           Just id -> [toTree id, toTree functype]
                           Nothing -> [toTree functype]
-    toTree (Func id typeuse params results) =
+    toTree (Func id typeuse) =
         Node "func" $ case id of
-                          Just id -> [toTree id]
-                                ++ case typeuse of
-                                       Just typeuse -> [toTree typeuse]
-                                                           ++ map toTree params
-                                                           ++ map toTree results
-                                       Nothing      -> map toTree params
-                                                           ++ map toTree results
-                          Nothing -> case typeuse of
-                                         Just typeuse -> [toTree typeuse]
-                                                             ++ map toTree params
-                                                             ++ map toTree results
-                                         Nothing      -> map toTree params
-                                                             ++ map toTree results
-
+                          Just id -> [toTree id, toTree typeuse]
+                          Nothing -> [toTree typeuse]
 
 instance ToTree FuncType where
-    toTree (FuncType params results) = Node "functype" $ map toTree params ++ map toTree results
+    toTree (FuncType params results) =
+        Node "functype" $ map toTree params ++ map toTree results
 
 instance ToTree Param where
     toTree (Param id valtype) =
@@ -247,7 +260,8 @@ instance ToTree Param where
             Nothing -> [toTree valtype]
 
 instance ToTree Result where
-    toTree (Result valtype) = Node "result" [toTree valtype]
+    toTree (Result valtype) =
+        Node "result" [toTree valtype]
 
 instance ToTree Ident where
     toTree (Ident id) = Leaf id
@@ -266,26 +280,31 @@ instance ToTree TypeUse where
         Node "typuse" $ case typeidx of
                             Left n -> [toTree n]
                             Right id -> [toTree id]
+    toTree (TypeUseWithDeclarations typeidx params results) =
+        Node "typuse" $ case typeidx of
+                            Left n -> [toTree n] ++ map toTree params ++ map toTree results
+                            Right id -> [toTree id] ++ map toTree params ++ map toTree results
+    toTree (InlineType params results) =
+        Node "typuse" $ map toTree params ++ map toTree results
 
 
 
 -- SHOW
 
-indentTree :: Int -> Tree -> IO ()
-indentTree n tree =
+
+indentTree :: FilePath -> Int -> Tree -> IO ()
+indentTree path n tree =
     case tree of
         Node str children -> do
-            putStrLn $ indent n ++ str
-            mapM_ (indentTree (n+1)) children
+            appendFile path $ indent n ++ str ++ "\n"
+            mapM_ (indentTree path (n+1)) children
         Leaf str          -> do
-            putStrLn $ indent n ++ str
-        -- Leaf str          -> do
-            -- putStr $ " " ++ str ++ " "
+            appendFile path $ indent n ++ str ++ "\n"
 
 
-indentOut :: ToTree a => a -> IO ()
-indentOut =
-      (indentTree 0) . toTree
+indentOut :: ToTree a => FilePath -> a -> IO ()
+indentOut path =
+      (indentTree path 0) . toTree 
 
 
 indent :: Int -> String
