@@ -1,6 +1,6 @@
 (module
-  (func) ;; disallow, needs some typuse
-  (func $funcId) ;; disallow as well
+  ;; (func) ;; no typuse error
+  ;; (func $funcId) ;; no typeuse error
   (func (type 1))
   (func (type 1) (param i32))
   (func (type 1) (result i32))
@@ -13,4 +13,8 @@
   (func $funcId (type $typeId) (param i32))
   (func $funcId (type $typeId) (result i32))
   (func $funcId (type $typeId) (param i32) (result i32))
+  (func (param i32))
+  (func (result i32))
+  (func (param i32) (result i32))
+  (func $funcId (param i32) (result i32))
 )
