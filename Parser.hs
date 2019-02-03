@@ -1,30 +1,10 @@
 module Parser where
 
-import Lexer hiding (runTest)
 import System.Directory
 import qualified Text.Parsec as Parsec
 import Text.Parsec ((<|>))
   
-
-
--- TEST
-
-
-testParser :: String ->  IO ()
-testParser testDirectory = do
-    tests <- listDirectory testDirectory
-    mapM_ (runTest testDirectory) tests
-
-
-runTest :: String -> String -> IO ()
-runTest testDirectory inputFile = do
-    putStrLn inputFile
-    text <- readFile $ testDirectory ++ "/" ++ inputFile
-    putStrLn text
-    case Parsec.parse parse inputFile text of
-        Left err  -> print err
-        Right m   -> indentOut m
-    putStr "\n"
+import Lexer hiding (runTest)
 
 
 
@@ -313,6 +293,27 @@ indent n =
 
 
 
+-- TEST
+
+
+testParser :: String ->  IO ()
+testParser testDirectory = do
+    tests <- listDirectory testDirectory
+    mapM_ (runTest testDirectory) tests
+
+
+runTest :: String -> String -> IO ()
+runTest testDirectory inputFile = do
+    text <- readFile $ testDirectory ++ "/" ++ inputFile
+    case Parsec.parse parse inputFile text of
+        Left err  -> writeFile errPath $ show err
+        Right out -> indentOut outPath out
+  where testName = reverse $ drop 4 $ reverse inputFile
+        errPath = testDirectory ++ "/" ++ testName ++ ".err"
+        outPath = testDirectory ++ "/" ++ testName ++ ".out"
+
+
+
 -- ERRORS
 
 
@@ -326,5 +327,3 @@ failStartsWithOrEmpty :: String -> String -> Token -> Parsec.Parsec String () a
 failStartsWithOrEmpty production expected actual =
     Parsec.unexpected $ ": A " ++ production ++ " must start with the \"" ++ expected ++ "\" keyword\
                         \ or be empty, but I am seeing \"" ++ (show actual) ++ "\""
-
-

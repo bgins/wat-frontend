@@ -1,33 +1,41 @@
 import System.Environment 
 
+import Data.List (isSuffixOf)
 import Lexer (testLexer)
 import Parser (testParser)
+import System.Directory (listDirectory, removeFile)
 
 
 main :: IO ()
 main = do
     args <- getArgs
     case args of
-        a:as -> case a of
-                    "--test" -> runTests as
-                    _        -> putStrLn flagsError
+        a:as ->
+            case a of
+                "lex"   ->
+                    case as of
+                        [directory] -> do
+                            clearResults directory
+                            testLexer directory
+                        _           -> putStrLn flagsError
+                "parse" ->
+                    case as of
+                        [directory] -> do
+                            clearResults directory
+                            testParser directory
+                        _           -> putStrLn flagsError
+
+                _        -> putStrLn flagsError
         _   -> putStrLn flagsError
 
 
-runTests :: [String] -> IO ()
-runTests testFlags =
-    case testFlags of
-        f:fs -> case f of
-                    "lexer"  ->
-                        case fs of
-                            [directory] -> testLexer directory
-                            _           -> putStrLn flagsError
-                    "parser" ->
-                        case fs of
-                            [directory] -> testParser directory
-                            _          -> putStrLn flagsError
-                    _        -> putStrLn $ f ++ " not implemented"
 
+clearResults :: FilePath -> IO ()
+clearResults directory = do
+    files <- listDirectory directory 
+    mapM_ removeFile $ map (\f -> directory ++ f)
+        $ filter (\f -> isSuffixOf ".out" f || isSuffixOf ".err" f) files
   
+
 flagsError :: String
-flagsError = "Use: ./Main --test [lexer|parser] [test directory]\n"
+flagsError = "\nUsage: ./Main lex|parse directory\n"

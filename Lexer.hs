@@ -11,26 +11,6 @@ import System.Directory
 import Keywords
 
 
--- TEST
-
-
-testLexer :: String -> IO ()
-testLexer testDirectory = do
-    tests <- listDirectory testDirectory 
-    mapM_ (runTest testDirectory) tests
-
-
-runTest :: String -> String -> IO ()
-runTest testDirectory inputFile = do
-    putStrLn $ id inputFile
-    text <- readFile $ testDirectory ++ "/" ++ inputFile
-    -- print text
-    case Parsec.parse lex inputFile text of
-        Left err  -> print err
-        Right x   -> print x
-    putStr "\n"
-
-
 
 -- TOKENS
 
@@ -345,3 +325,24 @@ blockCharOpenParen = do
 inBlockComment :: Parsec.Parsec String () String -> Parsec.Parsec String () String
 inBlockComment = do
     Parsec.between (Parsec.string "(;") (Parsec.string ";)")
+
+
+
+-- TEST
+
+
+testLexer :: String -> IO ()
+testLexer testDirectory = do
+    tests <- listDirectory testDirectory
+    mapM_ (runTest testDirectory) tests
+
+
+runTest :: String -> String -> IO ()
+runTest testDirectory inputFile = do
+    text <- readFile $ testDirectory ++ "/" ++ inputFile
+    case Parsec.parse lex inputFile text of
+        Left err  -> writeFile errPath $ show err
+        Right out  -> writeFile outPath $ show out
+  where testName = reverse $ drop 4 $ reverse inputFile
+        errPath = testDirectory ++ "/" ++ testName ++ ".err"
+        outPath = testDirectory ++ "/" ++ testName ++ ".out"

@@ -1,4 +1,6 @@
 *.hi
 *.o
-Lexer
-Parser
+
+Main
+*.err
+*.out
