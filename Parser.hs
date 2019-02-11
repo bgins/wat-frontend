@@ -11,7 +11,7 @@ import Lexer hiding (runTest)
 -- PARSE
 
 
-parse :: Parsec.Parsec String () Module
+parse :: Parser Module
 parse = do
     Parsec.optional whitespace
     m <- betweenParens wasmModule
@@ -20,7 +20,7 @@ parse = do
     return m 
 
 
-betweenParens :: Parsec.Parsec String () a -> Parsec.Parsec String () a
+betweenParens :: Parser a -> Parser a
 betweenParens =
     Parsec.between (Parsec.char '(') (Parsec.char ')')
 
@@ -33,7 +33,7 @@ data Module = Module Components
 -- data Module a = Module Components a
 -- type ParserId = Either Ident Int
 
-wasmModule :: Parsec.Parsec String () Module
+wasmModule :: Parser Module
 wasmModule = do
     kw <- Parsec.lookAhead closeParen <|> keyword
     case kw of
@@ -55,13 +55,13 @@ data Component = Type MaybeIdent FuncType
                -- | Func MaybeIdent TypeUse Locals Instructions
                | Func MaybeIdent TypeUse
 
-components :: Parsec.Parsec String () Components
+components :: Parser Components
 components = do
     cs <- Parsec.sepEndBy (betweenParens component) whitespace 
     return cs
     
 
-component :: Parsec.Parsec String () Component
+component :: Parser Component
 component = do
     kw <- keyword
     case kw of
@@ -112,7 +112,7 @@ identify id =
         Nothing      -> Nothing
 
 
-funcType :: Parsec.Parsec String () FuncType
+funcType :: Parser FuncType
 funcType = do
     kw <- keyword
     case kw of
@@ -126,7 +126,7 @@ funcType = do
         _                -> failStartsWith "function type" "func" kw
       
 
-param :: Parsec.Parsec String () Param
+param :: Parser Param
 param = do
     Parsec.lookAhead (Parsec.string "param")
     kw <- keyword
@@ -140,7 +140,7 @@ param = do
         _               -> failStartsWith "parameter" "param" kw
         
 
-result :: Parsec.Parsec String () Result
+result :: Parser Result
 result = do
     kw <- keyword
     case kw of
@@ -151,7 +151,7 @@ result = do
         _               -> failStartsWith "result" "result" kw
 
 
-valType :: Parsec.Parsec String () ValType
+valType :: Parser ValType
 valType = do
     kw <- keyword
     case kw of
@@ -174,7 +174,7 @@ data TypeUse = TypeUse TypeIdX
              | TypeUseWithDeclarations TypeIdX Params Results
              | InlineType Params Results
 
-typeUse :: Parsec.Parsec String () TypeUse
+typeUse :: Parser TypeUse
 typeUse = do
     typeidx <- Parsec.optionMaybe $ Parsec.try (betweenParens typeRef)
     Parsec.optional whitespace
@@ -193,7 +193,7 @@ typeUse = do
                                                    \ or an inline type signature"
 
 
-typeRef :: Parsec.Parsec String () TypeIdX
+typeRef :: Parser TypeIdX
 typeRef = do
     kw <- keyword
     case kw of
@@ -317,13 +317,13 @@ runTest testDirectory inputFile = do
 -- ERRORS
 
 
-failStartsWith :: String -> String -> Token -> Parsec.Parsec String () a
+failStartsWith :: String -> String -> Token -> Parser a
 failStartsWith production expected actual =
     Parsec.unexpected $ ": A " ++ production ++ " must start with the \"" ++ expected ++ "\" keyword\
                         \, but I am seeing \"" ++ (show actual) ++ "\""
 
 
-failStartsWithOrEmpty :: String -> String -> Token -> Parsec.Parsec String () a
+failStartsWithOrEmpty :: String -> String -> Token -> Parser a
 failStartsWithOrEmpty production expected actual =
     Parsec.unexpected $ ": A " ++ production ++ " must start with the \"" ++ expected ++ "\" keyword\
                         \ or be empty, but I am seeing \"" ++ (show actual) ++ "\""
