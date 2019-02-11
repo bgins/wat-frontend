@@ -11,19 +11,22 @@ import Lexer hiding (runTest)
 -- PARSE
 
 
-parse :: Parsec.Parsec String () Module
+parse :: Parser Module
 parse = do
-    Parsec.optional whitespace
-    m <- betweenParens wasmModule
-    Parsec.optional whitespace
+    m <- wrapSpace $ betweenParens wasmModule
     Parsec.eof
     return m 
 
 
-betweenParens :: Parsec.Parsec String () a -> Parsec.Parsec String () a
+betweenParens :: Parser a -> Parser a
 betweenParens =
     Parsec.between (Parsec.char '(') (Parsec.char ')')
 
+wrapSpace :: Parser a -> Parser a
+wrapSpace p = do Parsec.optional whitespace
+                 x <- p
+                 Parsec.optional whitespace
+                 return x
 
 -- MODULE
 
@@ -33,7 +36,7 @@ data Module = Module Components
 -- data Module a = Module Components a
 -- type ParserId = Either Ident Int
 
-wasmModule :: Parsec.Parsec String () Module
+wasmModule :: Parser Module
 wasmModule = do
     kw <- Parsec.lookAhead closeParen <|> keyword
     case kw of
@@ -55,26 +58,21 @@ data Component = Type MaybeIdent FuncType
                -- | Func MaybeIdent TypeUse Locals Instructions
                | Func MaybeIdent TypeUse
 
-components :: Parsec.Parsec String () Components
-components = do
-    cs <- Parsec.sepEndBy (betweenParens component) whitespace 
-    return cs
-    
+components :: Parser Components
+components =
+    Parsec.sepEndBy (betweenParens component) whitespace 
 
-component :: Parsec.Parsec String () Component
+
+component :: Parser Component
 component = do
     kw <- keyword
     case kw of
         Keyword "type" -> do
-            Parsec.optional whitespace
-            id <- Parsec.optionMaybe identifier
-            Parsec.optional whitespace
+            id <- wrapSpace $ Parsec.optionMaybe identifier
             ft <- betweenParens funcType
             return (Type (identify id) ft)
         Keyword "func" -> do
-            Parsec.optional whitespace
-            id <- Parsec.optionMaybe identifier
-            Parsec.optional whitespace
+            id <- wrapSpace $ Parsec.optionMaybe identifier
             typeuse <- typeUse
             return (Func (identify id) typeuse)
         _              -> failStartsWith "component" "type or func" kw
@@ -112,21 +110,19 @@ identify id =
         Nothing      -> Nothing
 
 
-funcType :: Parsec.Parsec String () FuncType
+funcType :: Parser FuncType
 funcType = do
     kw <- keyword
     case kw of
         Keyword "func" -> do
-            Parsec.optional whitespace
-            ps <- Parsec.sepEndBy (Parsec.try $ betweenParens param) whitespace
-            Parsec.optional whitespace
+            ps <- wrapSpace $ Parsec.sepEndBy (Parsec.try $ betweenParens param) whitespace
             rs <- Parsec.sepEndBy (betweenParens result) whitespace
             return (FuncType ps rs)
         CloseParen       -> return (FuncType [] [])
         _                -> failStartsWith "function type" "func" kw
       
 
-param :: Parsec.Parsec String () Param
+param :: Parser Param
 param = do
     Parsec.lookAhead (Parsec.string "param")
     kw <- keyword
@@ -140,7 +136,7 @@ param = do
         _               -> failStartsWith "parameter" "param" kw
         
 
-result :: Parsec.Parsec String () Result
+result :: Parser Result
 result = do
     kw <- keyword
     case kw of
@@ -151,7 +147,7 @@ result = do
         _               -> failStartsWith "result" "result" kw
 
 
-valType :: Parsec.Parsec String () ValType
+valType :: Parser ValType
 valType = do
     kw <- keyword
     case kw of
@@ -174,13 +170,11 @@ data TypeUse = TypeUse TypeIdX
              | TypeUseWithDeclarations TypeIdX Params Results
              | InlineType Params Results
 
-typeUse :: Parsec.Parsec String () TypeUse
+typeUse :: Parser TypeUse
 typeUse = do
     typeidx <- Parsec.optionMaybe $ Parsec.try (betweenParens typeRef)
-    Parsec.optional whitespace
-    ps <- Parsec.sepEndBy (Parsec.try $ betweenParens param) whitespace
-    Parsec.optional whitespace
-    rs <- Parsec.sepEndBy (betweenParens result) whitespace
+    ps      <- wrapSpace $ Parsec.sepEndBy (Parsec.try $ betweenParens param) whitespace
+    rs      <- Parsec.sepEndBy (betweenParens result) whitespace
     case typeidx of
         Just typeidx -> if ps == [] && rs == [] then
                             return (TypeUse typeidx)
@@ -193,7 +187,7 @@ typeUse = do
                                                    \ or an inline type signature"
 
 
-typeRef :: Parsec.Parsec String () TypeIdX
+typeRef :: Parser TypeIdX
 typeRef = do
     kw <- keyword
     case kw of
@@ -211,7 +205,9 @@ typeRef = do
 
 
 data Tree = Node String [Tree]
-          | Leaf String
+
+leaf    :: String -> Tree
+leaf str = Node str []
 
 class ToTree a where toTree :: a -> Tree
 
@@ -244,16 +240,16 @@ instance ToTree Result where
         Node "result" [toTree valtype]
 
 instance ToTree Ident where
-    toTree (Ident id) = Leaf id
+    toTree (Ident id) = leaf id
 
 instance ToTree ValType where
-    toTree I32 = Leaf "i32"
-    toTree I64 = Leaf "i64"
-    toTree F32 = Leaf "f32"
-    toTree F64 = Leaf "f64"
+    toTree I32 = leaf "i32"
+    toTree I64 = leaf "i64"
+    toTree F32 = leaf "f32"
+    toTree F64 = leaf "f64"
 
 instance ToTree Int where
-    toTree n = Leaf (show n)
+    toTree n = leaf (show n)
 
 instance ToTree TypeUse where
     toTree (TypeUse typeidx) =
@@ -273,23 +269,19 @@ instance ToTree TypeUse where
 
 
 indentTree :: FilePath -> Int -> Tree -> IO ()
-indentTree path n tree =
-    case tree of
-        Node str children -> do
-            appendFile path $ indent n ++ str ++ "\n"
-            mapM_ (indentTree path (n+1)) children
-        Leaf str          -> do
-            appendFile path $ indent n ++ str ++ "\n"
+indentTree path n (Node str children) = do
+    appendFile path $ indent n ++ str ++ "\n"
+    mapM_ (indentTree path (n+1)) children
 
 
 indentOut :: ToTree a => FilePath -> a -> IO ()
 indentOut path =
-      (indentTree path 0) . toTree 
+    indentTree path 0 . toTree 
 
 
 indent :: Int -> String
 indent n =
-    concat (replicate n "  ")
+    replicate (2*n) ' '
 
 
 
@@ -304,26 +296,28 @@ testParser testDirectory = do
 
 runTest :: String -> String -> IO ()
 runTest testDirectory inputFile = do
-    text <- readFile $ testDirectory ++ "/" ++ inputFile
+    text <- readFile $ testFile inputFile
     case Parsec.parse parse inputFile text of
         Left err  -> writeFile errPath $ show err
         Right out -> indentOut outPath out
-  where testName = reverse $ drop 4 $ reverse inputFile
-        errPath = testDirectory ++ "/" ++ testName ++ ".err"
-        outPath = testDirectory ++ "/" ++ testName ++ ".out"
+  where testName   = reverse $ drop 4 $ reverse inputFile
+        testFile s = testDirectory ++ "/" ++ s
+        path       = testFile testName
+        errPath    = path ++ ".err"
+        outPath    = path ++ ".out"
 
 
 
 -- ERRORS
 
 
-failStartsWith :: String -> String -> Token -> Parsec.Parsec String () a
+failStartsWith :: String -> String -> Token -> Parser a
 failStartsWith production expected actual =
     Parsec.unexpected $ ": A " ++ production ++ " must start with the \"" ++ expected ++ "\" keyword\
                         \, but I am seeing \"" ++ (show actual) ++ "\""
 
 
-failStartsWithOrEmpty :: String -> String -> Token -> Parsec.Parsec String () a
+failStartsWithOrEmpty :: String -> String -> Token -> Parser a
 failStartsWithOrEmpty production expected actual =
     Parsec.unexpected $ ": A " ++ production ++ " must start with the \"" ++ expected ++ "\" keyword\
                         \ or be empty, but I am seeing \"" ++ (show actual) ++ "\""

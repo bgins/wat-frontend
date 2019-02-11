@@ -11,6 +11,7 @@ import System.Directory
 import Keywords
 
 
+type Parser = Parsec.Parsec String ()
 
 -- TOKENS
 
@@ -40,7 +41,7 @@ instance Show Token where
 -- LEXER
 
 
-lex :: Parsec.Parsec String () [Token]
+lex :: Parser [Token]
 lex = do
     Parsec.optional whitespace
     ts <- tokens
@@ -48,12 +49,12 @@ lex = do
     return ts
 
 
-tokens :: Parsec.Parsec String () [Token]
+tokens :: Parser [Token]
 tokens = do
     Parsec.sepEndBy token whitespace
 
 
-token :: Parsec.Parsec String () Token
+token :: Parser Token
 token = do
     token <- Parsec.choice
         [ keyword
@@ -68,19 +69,19 @@ token = do
     return token
 
 
-whitespace :: Parsec.Parsec String () ()
+whitespace :: Parser ()
 whitespace = do
     Parsec.many $ space <|> format <|> Parsec.try comment
     return ()
 
 
-space :: Parsec.Parsec String () String
+space :: Parser String
 space = do
     c <- Parsec.char ' '
     return [c]
 
 
-format :: Parsec.Parsec String () String
+format :: Parser String
 format = do
     c <- Parsec.oneOf "\t\n\r"
     return [c]
@@ -89,7 +90,7 @@ format = do
 -- KEYWORDS
 
 
-keyword :: Parsec.Parsec String () Token
+keyword :: Parser Token
 keyword = do
     kw <- Parsec.choice $ map (Parsec.try . Parsec.string) Keywords.keywords
     return (Keyword kw)
@@ -99,52 +100,52 @@ keyword = do
 -- INTEGER LITERALS
 
 
-unsignedInteger :: Parsec.Parsec String () Token
+unsignedInteger :: Parser Token
 unsignedInteger = do
     uN <- hexnum <|> num
     return (UIntLit uN)
 
 
-signedInteger :: Parsec.Parsec String () Token
+signedInteger :: Parser Token
 signedInteger = do
     positiveInteger <|> negativeInteger
 
 
-positiveInteger :: Parsec.Parsec String () Token
+positiveInteger :: Parser Token
 positiveInteger = do
     Parsec.char '+'
     sN <- hexnum <|> num
     return (SIntLit sN)
 
 
-negativeInteger :: Parsec.Parsec String () Token
+negativeInteger :: Parser Token
 negativeInteger = do
     Parsec.char '-'
     sN <- hexnum <|> num
     return (SIntLit (- sN))
 
 
-hexnum :: Parsec.Parsec String () Int
+hexnum :: Parser Int
 hexnum = do
     Parsec.try (Parsec.string "0x")
     hds <- digits Parsec.hexDigit
     return (fromDigits 16 hds)
 
 
-num :: Parsec.Parsec String () Int
+num :: Parser Int
 num = do
   ds <- digits Parsec.digit
   return (fromDigits 10 ds)
 
 
-digits :: Parsec.Parsec String () Char -> Parsec.Parsec String () [Int]
+digits :: Parser Char -> Parser [Int]
 digits digitParser = do
     d <- digitToInt <$> digitParser
     ds <- Parsec.many (digit digitParser)
     return (d:ds)
 
 
-digit :: Parsec.Parsec String () Char -> Parsec.Parsec String () Int
+digit :: Parser Char -> Parser Int
 digit digitParser = do
     Parsec.optional (Parsec.char '_')
     d <- digitToInt <$> digitParser
@@ -160,25 +161,25 @@ fromDigits base ds =
 -- STRING LITERALS
 
 
-string :: Parsec.Parsec String () Token
+string :: Parser Token
 string = do
     str <- betweenQuotes (concat <$> Parsec.many stringElement)
     return (StringLit str)
 
 
-stringElement :: Parsec.Parsec String () String
+stringElement :: Parser String
 stringElement = do
     elem <- stringCharacter <|> escapeSequence
     return elem
 
 
-stringCharacter :: Parsec.Parsec String () String
+stringCharacter :: Parser String
 stringCharacter = do
     char <- Parsec.satisfy (\c -> c /= '\\' && c /= '\"' && not (isControl c))
     return [char]
 
 
-escapeSequence :: Parsec.Parsec String () String
+escapeSequence :: Parser String
 escapeSequence = do
     escape <- Parsec.char '\\'
     cs <- Parsec.choice
@@ -189,13 +190,13 @@ escapeSequence = do
     return (escape:cs)
 
 
-escapeCharacter :: Parsec.Parsec String () String
+escapeCharacter :: Parser String
 escapeCharacter = do
     c <- Parsec.oneOf "tnr\"`\\"
     return [c]
 
 
-rawByte :: Parsec.Parsec String () String
+rawByte :: Parser String
 rawByte = do
     n <- Parsec.hexDigit
     m <- Parsec.hexDigit
@@ -203,14 +204,14 @@ rawByte = do
     return [n, m]
 
 
-unicodeCharacter :: Parsec.Parsec String () String
+unicodeCharacter :: Parser String
 unicodeCharacter = do
     hds <- Parsec.between (Parsec.string "u{") (Parsec.string "}") (digits Parsec.hexDigit)
     cs <- unicodeHexString hds
     return ("u{" ++ cs ++ "}")
 
 
-unicodeHexString :: [Int] -> Parsec.Parsec String () String
+unicodeHexString :: [Int] -> Parser String
 unicodeHexString hds
     | val < 55296                   = return hexString   -- n < 0xD800
     | 57344 <= val && val < 1114112 = return hexString   -- 0xE000 <= n < 0x110000
@@ -219,7 +220,7 @@ unicodeHexString hds
             hexString = map intToDigit hds
 
 
-betweenQuotes :: Parsec.Parsec String () String -> Parsec.Parsec String () String
+betweenQuotes :: Parser String -> Parser String
 betweenQuotes =
     Parsec.between (Parsec.char '"') (Parsec.char '"')
 
@@ -228,7 +229,7 @@ betweenQuotes =
 -- IDENTIFIERS
 
 
-identifier :: Parsec.Parsec String () Token
+identifier :: Parser Token
 identifier = do
     marker <- Parsec.char '$'
     name <- Parsec.many1 (Parsec.oneOf idChar)
@@ -249,13 +250,13 @@ idChar =
 -- PARENS
 
 
-openParen :: Parsec.Parsec String () Token
+openParen :: Parser Token
 openParen = do
     Parsec.char '('
     return OpenParen
 
 
-closeParen :: Parsec.Parsec String () Token
+closeParen :: Parser Token
 closeParen = do
     Parsec.char ')'
     return CloseParen
@@ -265,7 +266,7 @@ closeParen = do
 -- RESERVED
 
 
-reserved :: Parsec.Parsec String () Token
+reserved :: Parser Token
 reserved = do
     r <- Parsec.many1 (Parsec.oneOf idChar)
     return (Reserved r)
@@ -275,30 +276,30 @@ reserved = do
 -- COMMENTS
 
 
-comment :: Parsec.Parsec String () String
+comment :: Parser String
 comment = do
     lineComment <|> blockComment
 
 
-lineComment :: Parsec.Parsec String () String
+lineComment :: Parser String
 lineComment = do
     Parsec.string ";; "
     lc <- Parsec.manyTill Parsec.anyChar eol
     return lc
 
 
-eol :: Parsec.Parsec String () ()
+eol :: Parser ()
 eol = do
      void Parsec.newline <|> Parsec.eof
 
 
-blockComment :: Parsec.Parsec String () String
+blockComment :: Parser String
 blockComment = do
     bc <- inBlockComment (concat <$> Parsec.many (Parsec.try blockComment <|> blockChar))
     return bc
 
 
-blockChar :: Parsec.Parsec String () String
+blockChar :: Parser String
 blockChar = do
     c <- Parsec.choice
         [ Parsec.try (Parsec.noneOf ";)")
@@ -308,21 +309,21 @@ blockChar = do
     return [c]
 
 
-blockCharSemi :: Parsec.Parsec String () Char
+blockCharSemi :: Parser Char
 blockCharSemi = do
     Parsec.char ';'
     Parsec.notFollowedBy (Parsec.char ')')
     return ';'
 
 
-blockCharOpenParen :: Parsec.Parsec String () Char
+blockCharOpenParen :: Parser Char
 blockCharOpenParen = do
     Parsec.char '('
     Parsec.notFollowedBy (Parsec.char ';')
     return '('
 
 
-inBlockComment :: Parsec.Parsec String () String -> Parsec.Parsec String () String
+inBlockComment :: Parser String -> Parser String
 inBlockComment = do
     Parsec.between (Parsec.string "(;") (Parsec.string ";)")
 
