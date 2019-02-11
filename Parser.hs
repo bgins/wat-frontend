@@ -206,7 +206,9 @@ typeRef = do
 
 
 data Tree = Node String [Tree]
-          | Leaf String
+
+leaf    :: String -> Tree
+leaf str = Node str []
 
 class ToTree a where toTree :: a -> Tree
 
@@ -239,16 +241,16 @@ instance ToTree Result where
         Node "result" [toTree valtype]
 
 instance ToTree Ident where
-    toTree (Ident id) = Leaf id
+    toTree (Ident id) = leaf id
 
 instance ToTree ValType where
-    toTree I32 = Leaf "i32"
-    toTree I64 = Leaf "i64"
-    toTree F32 = Leaf "f32"
-    toTree F64 = Leaf "f64"
+    toTree I32 = leaf "i32"
+    toTree I64 = leaf "i64"
+    toTree F32 = leaf "f32"
+    toTree F64 = leaf "f64"
 
 instance ToTree Int where
-    toTree n = Leaf (show n)
+    toTree n = leaf (show n)
 
 instance ToTree TypeUse where
     toTree (TypeUse typeidx) =
@@ -268,13 +270,9 @@ instance ToTree TypeUse where
 
 
 indentTree :: FilePath -> Int -> Tree -> IO ()
-indentTree path n tree =
-    case tree of
-        Node str children -> do
-            appendFile path $ indent n ++ str ++ "\n"
-            mapM_ (indentTree path (n+1)) children
-        Leaf str          -> do
-            appendFile path $ indent n ++ str ++ "\n"
+indentTree path n (Node str children) = do
+    appendFile path $ indent n ++ str ++ "\n"
+    mapM_ (indentTree path (n+1)) children
 
 
 indentOut :: ToTree a => FilePath -> a -> IO ()
