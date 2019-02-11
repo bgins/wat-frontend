@@ -59,10 +59,9 @@ data Component = Type MaybeIdent FuncType
                | Func MaybeIdent TypeUse
 
 components :: Parser Components
-components = do
-    cs <- Parsec.sepEndBy (betweenParens component) whitespace 
-    return cs
-    
+components =
+    Parsec.sepEndBy (betweenParens component) whitespace 
+
 
 component :: Parser Component
 component = do
@@ -277,12 +276,12 @@ indentTree path n (Node str children) = do
 
 indentOut :: ToTree a => FilePath -> a -> IO ()
 indentOut path =
-      (indentTree path 0) . toTree 
+    indentTree path 0 . toTree 
 
 
 indent :: Int -> String
 indent n =
-    concat (replicate n "  ")
+    replicate (2*n) ' '
 
 
 
@@ -297,13 +296,15 @@ testParser testDirectory = do
 
 runTest :: String -> String -> IO ()
 runTest testDirectory inputFile = do
-    text <- readFile $ testDirectory ++ "/" ++ inputFile
+    text <- readFile $ testFile inputFile
     case Parsec.parse parse inputFile text of
         Left err  -> writeFile errPath $ show err
         Right out -> indentOut outPath out
-  where testName = reverse $ drop 4 $ reverse inputFile
-        errPath = testDirectory ++ "/" ++ testName ++ ".err"
-        outPath = testDirectory ++ "/" ++ testName ++ ".out"
+  where testName   = reverse $ drop 4 $ reverse inputFile
+        testFile s = testDirectory ++ "/" ++ s
+        path       = testFile testName
+        errPath    = path ++ ".err"
+        outPath    = path ++ ".out"
 
 
 
