@@ -13,9 +13,7 @@ import Lexer hiding (runTest)
 
 parse :: Parser Module
 parse = do
-    Parsec.optional whitespace
-    m <- betweenParens wasmModule
-    Parsec.optional whitespace
+    m <- wrapSpace $ betweenParens wasmModule
     Parsec.eof
     return m 
 
@@ -24,6 +22,11 @@ betweenParens :: Parser a -> Parser a
 betweenParens =
     Parsec.between (Parsec.char '(') (Parsec.char ')')
 
+wrapSpace :: Parser a -> Parser a
+wrapSpace p = do Parsec.optional whitespace
+                 x <- p
+                 Parsec.optional whitespace
+                 return x
 
 -- MODULE
 
@@ -66,15 +69,11 @@ component = do
     kw <- keyword
     case kw of
         Keyword "type" -> do
-            Parsec.optional whitespace
-            id <- Parsec.optionMaybe identifier
-            Parsec.optional whitespace
+            id <- wrapSpace $ Parsec.optionMaybe identifier
             ft <- betweenParens funcType
             return (Type (identify id) ft)
         Keyword "func" -> do
-            Parsec.optional whitespace
-            id <- Parsec.optionMaybe identifier
-            Parsec.optional whitespace
+            id <- wrapSpace $ Parsec.optionMaybe identifier
             typeuse <- typeUse
             return (Func (identify id) typeuse)
         _              -> failStartsWith "component" "type or func" kw
@@ -117,9 +116,7 @@ funcType = do
     kw <- keyword
     case kw of
         Keyword "func" -> do
-            Parsec.optional whitespace
-            ps <- Parsec.sepEndBy (Parsec.try $ betweenParens param) whitespace
-            Parsec.optional whitespace
+            ps <- wrapSpace $ Parsec.sepEndBy (Parsec.try $ betweenParens param) whitespace
             rs <- Parsec.sepEndBy (betweenParens result) whitespace
             return (FuncType ps rs)
         CloseParen       -> return (FuncType [] [])
@@ -177,10 +174,8 @@ data TypeUse = TypeUse TypeIdX
 typeUse :: Parser TypeUse
 typeUse = do
     typeidx <- Parsec.optionMaybe $ Parsec.try (betweenParens typeRef)
-    Parsec.optional whitespace
-    ps <- Parsec.sepEndBy (Parsec.try $ betweenParens param) whitespace
-    Parsec.optional whitespace
-    rs <- Parsec.sepEndBy (betweenParens result) whitespace
+    ps      <- wrapSpace $ Parsec.sepEndBy (Parsec.try $ betweenParens param) whitespace
+    rs      <- Parsec.sepEndBy (betweenParens result) whitespace
     case typeidx of
         Just typeidx -> if ps == [] && rs == [] then
                             return (TypeUse typeidx)
