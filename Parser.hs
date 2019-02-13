@@ -34,7 +34,6 @@ wrapSpace p = do Parsec.optional whitespace
 data Module = Module Components
 
 -- data Module a = Module Components a
--- type ParserId = Either Ident Int
 
 wasmModule :: Parser Module
 wasmModule = do
@@ -55,8 +54,8 @@ wasmModule = do
 type Components = [Component]
 
 data Component = Type MaybeIdent FuncType
-               -- | Func MaybeIdent TypeUse Locals Instructions
-               | Func MaybeIdent TypeUse
+               | Func MaybeIdent TypeUse Locals Instructions
+               | Start FuncIdX
 
 components :: Parser Components
 components =
@@ -74,10 +73,29 @@ component = do
         Keyword "func" -> do
             id <- wrapSpace $ Parsec.optionMaybe identifier
             typeuse <- typeUse
-            return (Func (identify id) typeuse)
+            locals <- locals
+            instructions <- instructions
+            return (Func (identify id) typeuse locals instructions)
+        Keyword "start" -> do
+            whitespace
+            funcidx <- Parsec.try unsignedInteger <|> identifier
+            -- can this be handled better?
+            case funcidx of
+                UIntLit n -> return (Start $ Left n)  -- TODO: must be u32
+                Id id     -> return (Start $ Right (Ident id))  -- TODO: check for it in identifier context
         _              -> failStartsWith "component" "type or func" kw
+            
 
 
+-- INDICES
+
+type FuncIdX = Either Int Ident
+
+type LabelIdX = Either Int Ident
+
+type LabelIdXs = [LabelIdX]
+
+type TypeIdX = Either Int Ident
 
 
 -- TYPES
@@ -138,6 +156,7 @@ param = do
 
 result :: Parser Result
 result = do
+    Parsec.lookAhead (Parsec.string "result")
     kw <- keyword
     case kw of
         Keyword "result" -> do
@@ -164,8 +183,6 @@ valType = do
 -- TYPE USE
 
 
-type TypeIdX = Either Int Ident
-
 data TypeUse = TypeUse TypeIdX
              | TypeUseWithDeclarations TypeIdX Params Results
              | InlineType Params Results
@@ -174,7 +191,7 @@ typeUse :: Parser TypeUse
 typeUse = do
     typeidx <- Parsec.optionMaybe $ Parsec.try (betweenParens typeRef)
     ps      <- wrapSpace $ Parsec.sepEndBy (Parsec.try $ betweenParens param) whitespace
-    rs      <- Parsec.sepEndBy (betweenParens result) whitespace
+    rs      <- Parsec.sepEndBy (Parsec.try $ betweenParens result) whitespace
     case typeidx of
         Just typeidx -> if ps == [] && rs == [] then
                             return (TypeUse typeidx)
@@ -201,6 +218,98 @@ typeRef = do
 
 
 
+-- FUNCS
+
+
+type Locals = [Local]
+
+data Local = Local MaybeIdent ValType
+
+type Instructions = [Instruction]
+
+-- data Instruction = PlainInstruction
+--                  | BlockInstruction
+
+-- data PlainInstruction = Unreachable
+--                       | Nop
+--                       | Br LabelIdX
+--                       | BrIf LabelIdX
+--                       | BrTable LabelIdXs LabelIdX
+--                       | Return
+--                       | Call FuncIdX
+--                       | CallIndirect TypeUse
+--                       | Drop
+--                       | Select
+
+-- data BlockInsruction = Block MaybeIdent ResultType Instructions MaybeIdent
+--                      | Loop MaybeIdent ResultType Instructions MaybeIdent
+--                      | Conditional MaybeIdent ResultType Instructions MaybeIdent Instructions MaybeIdent
+                     
+
+data Instruction = Block MaybeIdent ResultType Instructions MaybeIdent
+                 | Loop MaybeIdent ResultType Instructions MaybeIdent
+                 | Conditional MaybeIdent ResultType Instructions MaybeIdent Instructions MaybeIdent
+                 | Unreachable
+                 | Nop
+                 | Br LabelIdX
+                 | BrIf LabelIdX
+                 | BrTable LabelIdXs LabelIdX
+                 | Return
+                 | Call FuncIdX
+                 | CallIndirect TypeUse
+                 | Drop
+                 | Select
+
+type ResultType = Maybe Result
+
+locals :: Parser Locals
+locals =
+    concat <$> Parsec.sepEndBy (betweenParens local) whitespace 
+
+
+local :: Parser [Local]
+local = do
+    kw <- keyword
+    case kw of
+        Keyword "local" -> do
+            whitespace
+            id <- Parsec.optionMaybe identifier
+            case id of
+                Just _ -> do
+                    whitespace
+                    vt <- valType
+                    return ([Local (identify id) vt])
+                Nothing -> do
+                    vts <- Parsec.sepBy valType whitespace
+                    Parsec.optional whitespace
+                    return (map (Local Nothing) vts)
+        _              -> failStartsWith "local" "local" kw
+   
+
+instructions :: Parser Instructions
+instructions =
+    Parsec.sepEndBy instruction whitespace  -- check for last local first?
+
+
+instruction :: Parser Instruction
+instruction = do
+    kw <- keyword
+    case kw of
+        Keyword "block" -> return Nop
+        Keyword "loop" -> return Nop
+        Keyword "if" -> return Nop
+        Keyword "unreachable" -> return Unreachable
+        Keyword "nop" -> return Nop
+        Keyword "br" -> return Nop
+        Keyword "br_if" -> return Nop
+        Keyword "br_table" -> return Nop
+        Keyword "return" -> return Return
+        Keyword "call" -> return Nop
+        Keyword "call_indirect" -> return Nop
+  
+
+
+
 -- TREE REPRESENTATION
 
 
@@ -220,10 +329,14 @@ instance ToTree Component where
         Node "type" $ case id of
                           Just id -> [toTree id, toTree functype]
                           Nothing -> [toTree functype]
-    toTree (Func id typeuse) =
+    toTree (Func id typeuse locals instructions) =
         Node "func" $ case id of
-                          Just id -> [toTree id, toTree typeuse]
-                          Nothing -> [toTree typeuse]
+                          Just id -> [toTree id, toTree typeuse] ++ map toTree locals ++ map toTree instructions
+                          Nothing -> [toTree typeuse] ++ map toTree locals ++ map toTree instructions
+    toTree (Start funcidx) =
+        Node "start" $ case funcidx of
+                           Left n   -> [toTree n]
+                           Right id -> [toTree id]
 
 instance ToTree FuncType where
     toTree (FuncType params results) =
@@ -242,6 +355,7 @@ instance ToTree Result where
 instance ToTree Ident where
     toTree (Ident id) = leaf id
 
+
 instance ToTree ValType where
     toTree I32 = leaf "i32"
     toTree I64 = leaf "i64"
@@ -254,15 +368,63 @@ instance ToTree Int where
 instance ToTree TypeUse where
     toTree (TypeUse typeidx) =
         Node "typuse" $ case typeidx of
-                            Left n -> [toTree n]
+                            Left n   -> [toTree n]
                             Right id -> [toTree id]
     toTree (TypeUseWithDeclarations typeidx params results) =
         Node "typuse" $ case typeidx of
-                            Left n -> [toTree n] ++ map toTree params ++ map toTree results
+                            Left n   -> [toTree n] ++ map toTree params ++ map toTree results
                             Right id -> [toTree id] ++ map toTree params ++ map toTree results
     toTree (InlineType params results) =
         Node "typuse" $ map toTree params ++ map toTree results
 
+instance ToTree Local where
+    toTree (Local id valtype) =
+        Node "local" $ case id of
+            Just id -> [toTree id, toTree valtype]
+            Nothing -> [toTree valtype]
+
+
+instance ToTree Instruction where
+    toTree (Block label resulttype instructions id) =
+        Node "block" []
+    toTree (Loop label resulttype instructions id) =
+        Node "loop" []
+    toTree (Conditional label resulttype ifInstructions ifId elseInstructions elseId) =
+        Node "if" []
+    toTree Unreachable =
+        leaf "unreachable"
+    toTree Nop =
+        leaf "nop"
+    toTree (Br labelIdX) =
+        Node "br" []
+    toTree (BrIf labelIdX) =
+        Node "br_if" []
+    toTree (BrTable labelIdXs labelIdX) =
+        Node "br_table" []
+    toTree Return =
+        leaf "return"
+    toTree (Call funcIdX) =
+        Node "call" []
+    toTree (CallIndirect typeUse) =
+        Node "call_indirect" []
+    toTree Drop =
+        leaf "drop"
+    toTree Select =
+        leaf "select"
+
+-- data Instruction = Block MaybeIdent ResultType Instructions MaybeIdent
+--                  | Loop MaybeIdent ResultType Instructions MaybeIdent
+--                  | Conditional MaybeIdent ResultType Instructions MaybeIdent Instructions MaybeIdent
+--                  | Unreachable
+--                  | Nop
+--                  | Br LabelIdX
+--                  | BrIf LabelIdX
+--                  | BrTable LabelIdXs LabelIdX
+--                  | Return
+--                  | Call FuncIdX
+--                  | CallIndirect TypeUse
+--                  | Drop
+--                  | Select
 
 
 -- SHOW
