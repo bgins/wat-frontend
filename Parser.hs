@@ -12,8 +12,9 @@ import Lexer hiding (runTest)
 
 -- PARSE
 
+type ParserIdX = Either Int Ident
 
-parse :: Parser Module
+parse :: Parser (Module ParserIdX)
 parse = do
     m <- wrapSpace $ betweenParens wasmModule
     Parsec.eof
@@ -42,11 +43,9 @@ leftPad p = do
 -- MODULE
 
 
-data Module = Module MaybeIdent Components
+data Module id = Module MaybeIdent (Components id)
 
--- data Module a = Module Components a
-
-wasmModule :: Parser Module
+wasmModule :: Parser (Module ParserIdX)
 wasmModule = do
     mod <- Parsec.lookAhead closeParen <|> keyword
     case mod of
@@ -62,20 +61,20 @@ wasmModule = do
 -- COMPONENTS
 
 
-type Components = [Component]
+type Components id = [Component id]
 
-data Component = Type MaybeIdent FuncType
-               | Import ModuleName Name ImportDescription
-               | Func MaybeIdent TypeUse Locals Instructions
-               | Start FuncIdX
-               | Export Name ExportDescription
+data Component id = Type MaybeIdent FuncType
+                  | Import ModuleName Name (ImportDescription id)
+                  | Func MaybeIdent (TypeUse id) Locals (Instructions id)
+                  | Start id
+                  | Export Name (ExportDescription id)
 
-components :: Parser Components
+components :: Parser (Components ParserIdX)
 components =
     Parsec.sepEndBy (betweenParens component) whitespace 
 
 
-component :: Parser Component
+component :: Parser (Component ParserIdX)
 component = do
     kw <- keyword
     case kw of
@@ -96,7 +95,6 @@ component = do
             return (Func (identify id) typeuse locals instructions)
         Keyword "start" -> do
             funcidx <- leftPad $ Parsec.try unsignedInteger <|> identifier
-            -- can this be handled better?
             case funcidx of
                 UIntLit n -> return (Start $ Left n)  -- TODO: must be u32
                 Id id     -> return (Start $ Right (Ident id))  -- TODO: check for it in identifier context
@@ -113,18 +111,6 @@ tokenToString strToken =
     case strToken of
         StringLit str -> str
 
-
-
-
--- INDICES
-
-type FuncIdX = Either Int Ident
-
-type LabelIdX = Either Int Ident
-
-type LabelIdXs = [LabelIdX]
-
-type TypeIdX = Either Int Ident
 
 
 -- TYPES
@@ -209,11 +195,11 @@ valType = do
 -- TYPE USE
 
 
-data TypeUse = TypeUse TypeIdX
-             | TypeUseWithDeclarations TypeIdX Params Results
-             | InlineType Params Results
+data TypeUse id = TypeUse id
+                | TypeUseWithDeclarations id Params Results
+                | InlineType Params Results
 
-typeUse :: Parser TypeUse
+typeUse :: Parser (TypeUse ParserIdX)
 typeUse = do
     typeidx <- Parsec.optionMaybe $ Parsec.try (betweenParens typeRef)
     ps      <- wrapSpace $ Parsec.sepEndBy (Parsec.try $ betweenParens param) whitespace
@@ -230,7 +216,7 @@ typeUse = do
                                                    \ or an inline type signature"
 
 
-typeRef :: Parser TypeIdX
+typeRef :: Parser ParserIdX
 typeRef = do
     kw <- keyword
     case kw of
@@ -249,10 +235,10 @@ type ModuleName = String
 
 type Name = String
 
-data ImportDescription = FuncImport MaybeIdent TypeUse
+data ImportDescription id = FuncImport MaybeIdent (TypeUse id)
                        -- table, memory, and global imports go here
 
-importdesc :: Parser ImportDescription
+importdesc :: Parser (ImportDescription ParserIdX)
 importdesc = do
     kw <- keyword
     case kw of
@@ -270,7 +256,7 @@ type Locals = [Local]
 
 data Local = Local MaybeIdent ValType
 
-type Instructions = [Instruction]
+type Instructions id = [Instruction id]
 
 -- data Instruction = PlainInstruction
 --                  | BlockInstruction
@@ -291,19 +277,19 @@ type Instructions = [Instruction]
 --                      | Conditional MaybeIdent ResultType Instructions MaybeIdent Instructions MaybeIdent
 
 
-data Instruction = Block MaybeIdent ResultType Instructions MaybeIdent
-                 | Loop MaybeIdent ResultType Instructions MaybeIdent
-                 | Conditional MaybeIdent ResultType Instructions MaybeIdent Instructions MaybeIdent
-                 | Unreachable
-                 | Nop
-                 | Br LabelIdX
-                 | BrIf LabelIdX
-                 | BrTable LabelIdXs LabelIdX
-                 | Return
-                 | Call FuncIdX
-                 | CallIndirect TypeUse
-                 | Drop
-                 | Select
+data Instruction id = Block MaybeIdent ResultType (Instructions id) MaybeIdent
+                    | Loop MaybeIdent ResultType (Instructions id) MaybeIdent
+                    | Conditional MaybeIdent ResultType (Instructions id) MaybeIdent (Instructions id) MaybeIdent
+                    | Unreachable
+                    | Nop
+                    | Br id
+                    | BrIf id
+                    | BrTable [id] id
+                    | Return
+                    | Call id
+                    | CallIndirect (TypeUse id)
+                    | Drop
+                    | Select
 
 type ResultType = Maybe Result
 
@@ -328,12 +314,12 @@ local = do
         _              -> failStartsWith "local" "local" kw
 
 
-instructions :: Parser Instructions
+instructions :: Parser (Instructions ParserIdX)
 instructions =
     Parsec.sepEndBy instruction whitespace
 
 
-instruction :: Parser Instruction
+instruction :: Parser (Instruction ParserIdX)
 instruction = do
     kw <- keyword
     case kw of
@@ -353,10 +339,10 @@ instruction = do
 -- IMPORTS
 
 
-data ExportDescription = FuncExport FuncIdX
+data ExportDescription id = FuncExport id 
                        -- table, memory, and global exports go here
 
-exportdesc :: Parser ExportDescription
+exportdesc :: Parser (ExportDescription ParserIdX)
 exportdesc = do
     kw <- keyword
     case kw of
@@ -377,13 +363,13 @@ leaf str = Node str []
 
 class ToTree a where toTree :: a -> Tree
 
-instance ToTree Module where
+instance ToTree (Module ParserIdX) where
     toTree (Module id components) =
         Node "module" $ case id of
                             Just id -> [toTree id] ++ map toTree components
                             Nothing -> map toTree components
 
-instance ToTree Component where
+instance ToTree (Component ParserIdX) where
     toTree (Type id functype) =
         Node "type" $ case id of
                           Just id -> [toTree id, toTree functype]
@@ -430,13 +416,13 @@ instance ToTree Int where
 instance ToTree String where
     toTree str = leaf (show str)
 
-instance ToTree ImportDescription where
+instance ToTree (ImportDescription ParserIdX) where
     toTree (FuncImport id typeuse) =
         Node "func" $ case id of
             Just id -> [toTree id, toTree typeuse]
             Nothing -> [toTree typeuse]
 
-instance ToTree TypeUse where
+instance ToTree (TypeUse ParserIdX) where
     toTree (TypeUse typeidx) =
         Node "typuse" $ case typeidx of
                             Left n   -> [toTree n]
@@ -454,7 +440,7 @@ instance ToTree Local where
             Just id -> [toTree id, toTree valtype]
             Nothing -> [toTree valtype]
 
-instance ToTree Instruction where
+instance ToTree (Instruction ParserIdX) where
     toTree (Block label resulttype instructions id) =
         Node "block" []
     toTree (Loop label resulttype instructions id) =
@@ -482,7 +468,7 @@ instance ToTree Instruction where
     toTree Select =
         leaf "select"
 
-instance ToTree ExportDescription where
+instance ToTree (ExportDescription ParserIdX) where
     toTree (FuncExport funcidx) =
         Node "func" $ case funcidx of
                           Left n   -> [toTree n]
