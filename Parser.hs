@@ -98,6 +98,7 @@ data Component id = Type MaybeIdent FuncType
                   | Import ModuleName Name (ImportDescription id)
                   | Func MaybeIdent (TypeUse id) Locals (Instructions id)
                   | Start id
+                  | Global MaybeIdent GlobalType (Instructions id)
                   | Export Name (ExportDescription id)
 
 components :: Parser (Components ParserIdX)
@@ -127,6 +128,11 @@ component = do
         Keyword "start" -> do
             funcidx <- leftPad $ Parsec.try unsignedInteger <|> identifier
             return (Start $ parserIdX funcidx)
+        Keyword "global" -> do
+            id <- leftPad $ Parsec.optionMaybe identifier
+            globaltype <- wrapSpace $ globalType
+            instructions <- leftPad $ instructions
+            return (Global (identify id) globaltype instructions)
         Keyword "export" -> do
             nm <- leftPad $ string
             expdesc <- leftPad $ betweenParens exportdesc
@@ -140,6 +146,9 @@ component = do
 
 
 data FuncType = FuncType Params Results
+
+data GlobalType = GlobalConst ValType
+                | GlobalVar ValType
 
 type Params = [Param]
 
@@ -157,8 +166,6 @@ data ValType = I32
              | I64
              | F32
              | F64 deriving (Eq)
-
-
 
 funcType :: Parser FuncType
 funcType = do
@@ -206,6 +213,29 @@ valType = do
         _             -> Parsec.unexpected $
                              ": A value type must be \"i32\", \"i64\", \"f32\", or \"f64\" keyword\
                              \ but I am seeing \"" ++ (show kw) ++ "\""
+
+
+globalType :: Parser GlobalType
+globalType = do
+    Parsec.try (betweenParens globalVar) <|> globalConst
+
+
+globalConst :: Parser GlobalType
+globalConst = do
+    vt <- valType
+    return (GlobalConst vt)
+
+
+globalVar :: Parser GlobalType
+globalVar = do
+    kw <- keyword
+    case kw of
+        Keyword "mut" -> do
+            vt <- leftPad $ valType
+            return (GlobalVar vt)
+        _             -> Parsec.unexpected $
+                             ": a global can be marked as mutable with \"mut\" or\
+                             \ the type alone for a constant"
 
 
 
@@ -683,6 +713,8 @@ instance ToTree (Component ParserIdX) where
         Node "import" [toTree mod, toTree name, toTree importdesc]
     toTree (Func maybeId typeuse locals instructions) =
         Node "func" $ maybeIdToTree maybeId ++  [toTree typeuse] ++ map toTree locals ++ map toTree instructions
+    toTree (Global maybeId globaltype instructions) =
+        Node "global" $ maybeIdToTree maybeId ++ [toTree globaltype] ++ map toTree instructions
     toTree (Start funcidx) =
         Node "start" [idxToTree funcidx]
     toTree (Export name exportdesc) =
@@ -708,6 +740,12 @@ instance ToTree ValType where
     toTree I64 = leaf "i64"
     toTree F32 = leaf "f32"
     toTree F64 = leaf "f64"
+
+instance ToTree GlobalType where
+    toTree (GlobalVar valtype) =
+        Node "mut" [toTree valtype]
+    toTree (GlobalConst valtype) =
+        Node "const" [toTree valtype]
 
 instance ToTree Int where
     toTree n = leaf (show n)
