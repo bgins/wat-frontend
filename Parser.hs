@@ -52,6 +52,25 @@ toInt token =
         UIntLit num -> num
         SIntLit num -> num
 
+toModuleName :: Token -> ModuleName
+toModuleName token =
+    case token of
+        StringLit str -> ModuleName str
+
+
+toName :: Token -> Name
+toName token =
+    case token of
+        StringLit str -> Name str
+
+
+identify :: Maybe Token -> Maybe Ident
+identify id =
+    case id of
+        Just (Id id) -> Just (Ident id)
+        Nothing      -> Nothing
+
+
 -- MODULE
 
 
@@ -116,17 +135,6 @@ component = do
 
 
 
-toModuleName :: Token -> ModuleName
-toModuleName token =
-    case token of
-        StringLit str -> ModuleName str
-
-toName :: Token -> Name
-toName token =
-    case token of
-        StringLit str -> Name str
-
-
 
 -- TYPES
 
@@ -150,12 +158,6 @@ data ValType = I32
              | F32
              | F64 deriving (Eq)
 
-
-identify :: Maybe Token -> Maybe Ident
-identify id =
-    case id of
-        Just (Id id) -> Just (Ident id)
-        Nothing      -> Nothing
 
 
 funcType :: Parser FuncType
@@ -653,31 +655,34 @@ data Tree = Node String [Tree]
 leaf    :: String -> Tree
 leaf str = Node str []
 
+
 idxToTree :: ParserIdX -> Tree
 idxToTree idx =
     case idx of
         Left n   -> toTree n
         Right id -> toTree id
 
+
+maybeIdToTree :: MaybeIdent -> [Tree]
+maybeIdToTree maybeId =
+    case maybeId of
+        Just id -> [toTree id]
+        Nothing -> []
+
+
 class ToTree a where toTree :: a -> Tree
 
 instance ToTree (Module ParserIdX) where
-    toTree (Module id components) =
-        Node "module" $ case id of
-                            Just id -> [toTree id] ++ map toTree components
-                            Nothing -> map toTree components
+    toTree (Module maybeId components) =
+        Node "module" $ maybeIdToTree maybeId ++ map toTree components
 
 instance ToTree (Component ParserIdX) where
-    toTree (Type id functype) =
-        Node "type" $ case id of
-                          Just id -> [toTree id, toTree functype]
-                          Nothing -> [toTree functype]
+    toTree (Type maybeId functype) =
+        Node "type" $ maybeIdToTree maybeId ++ [toTree functype]
     toTree (Import mod name importdesc) =
         Node "import" [toTree mod, toTree name, toTree importdesc]
-    toTree (Func id typeuse locals instructions) =
-        Node "func" $ case id of
-                          Just id -> [toTree id, toTree typeuse] ++ map toTree locals ++ map toTree instructions
-                          Nothing -> [toTree typeuse] ++ map toTree locals ++ map toTree instructions
+    toTree (Func maybeId typeuse locals instructions) =
+        Node "func" $ maybeIdToTree maybeId ++  [toTree typeuse] ++ map toTree locals ++ map toTree instructions
     toTree (Start funcidx) =
         Node "start" [idxToTree funcidx]
     toTree (Export name exportdesc) =
@@ -688,10 +693,8 @@ instance ToTree FuncType where
         Node "functype" $ map toTree params ++ map toTree results
 
 instance ToTree Param where
-    toTree (Param id valtype) =
-        Node "param" $ case id of
-            Just id -> [toTree id, toTree valtype]
-            Nothing -> [toTree valtype]
+    toTree (Param maybeId valtype) =
+        Node "param" $ maybeIdToTree maybeId ++ [toTree valtype]
 
 instance ToTree Result where
     toTree (Result valtype) =
@@ -722,10 +725,8 @@ instance ToTree Name where
     toTree (Name name) = leaf (show name)
 
 instance ToTree (ImportDescription ParserIdX) where
-    toTree (FuncImport id typeuse) =
-        Node "func" $ case id of
-            Just id -> [toTree id, toTree typeuse]
-            Nothing -> [toTree typeuse]
+    toTree (FuncImport maybeId typeuse) =
+        Node "func" $ maybeIdToTree maybeId ++ [toTree typeuse]
 
 instance ToTree (TypeUse ParserIdX) where
     toTree (TypeUse typeidx) =
@@ -736,10 +737,8 @@ instance ToTree (TypeUse ParserIdX) where
         Node "typuse" $ map toTree params ++ map toTree results
 
 instance ToTree Local where
-    toTree (Local id valtype) =
-        Node "local" $ case id of
-            Just id -> [toTree id, toTree valtype]
-            Nothing -> [toTree valtype]
+    toTree (Local maybeId valtype) =
+        Node "local" $ maybeIdToTree maybeId ++ [toTree valtype]
 
 instance ToTree (Instruction ParserIdX) where
     -- control instructions
