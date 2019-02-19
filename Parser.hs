@@ -5,7 +5,7 @@ module Parser where
 import System.Directory
 import qualified Text.Parsec as Parsec
 import Text.Parsec ((<|>))
-  
+
 import Lexer hiding (runTest)
 
 
@@ -18,7 +18,7 @@ parse :: Parser (Module ParserIdX)
 parse = do
     m <- wrapSpace $ betweenParens wasmModule
     Parsec.eof
-    return m 
+    return m
 
 
 parserIdX :: Token -> ParserIdX
@@ -476,22 +476,86 @@ instructions =
     Parsec.sepEndBy instruction whitespace
 
 
+block :: Parser (Instruction ParserIdX)
+block = do
+    label <- leftPad $ Parsec.optionMaybe identifier
+    resulttype <- leftPad $ Parsec.optionMaybe (betweenParens result)
+    instructions <- Parsec.manyTill (leftPad $ instruction) (Parsec.try end)
+    id <- leftPad $ Parsec.optionMaybe identifier
+    if label == id || id == Nothing then
+        return (Block (identify label) resulttype instructions (identify id))
+    else
+        Parsec.unexpected $ ": block label and trailing id must match"
+
+
+loop :: Parser (Instruction ParserIdX)
+loop = do
+    label <- leftPad $ Parsec.optionMaybe identifier
+    resulttype <- leftPad $ Parsec.optionMaybe (betweenParens result)
+    instructions <- Parsec.manyTill (leftPad $ instruction) (Parsec.try end)
+    id <- leftPad $ Parsec.optionMaybe identifier
+    if label == id || id == Nothing then
+        return (Loop (identify label) resulttype instructions (identify id))
+    else
+        Parsec.unexpected $ ": loop label and trailing id must match"
+
+
+conditional :: Parser (Instruction ParserIdX)
+conditional = do
+    label <- leftPad $ Parsec.optionMaybe identifier
+    resulttype <- leftPad $ Parsec.optionMaybe (betweenParens result)
+    ifinstrs <- Parsec.manyTill (leftPad $ instruction) (Parsec.try endOrElse)
+    firstId <- leftPad $ Parsec.optionMaybe identifier
+    elseinstrs <- leftPad $ Parsec.option [] elseInstructions
+    secondId <- leftPad $ Parsec.optionMaybe identifier
+    if (label == firstId && firstId == secondId)
+       || (label == firstId && secondId == Nothing)
+       || (label == secondId && firstId == Nothing)
+       || (firstId == Nothing && secondId == Nothing) then
+        return (Conditional (identify label) resulttype ifinstrs (identify firstId) elseinstrs (identify secondId))
+    else
+        Parsec.unexpected $ ": if label and trailing ids must match"
+
+
+elseInstructions :: Parser (Instructions ParserIdX)
+elseInstructions = do
+    Parsec.manyTill (leftPad $ instruction) (Parsec.try end)
+
+
+endOrElse :: Parser String
+endOrElse = do
+    leftPad $ Parsec.try (Parsec.string "end") <|> Parsec.string "else"
+
+
+end :: Parser String
+end = do
+    leftPad $ Parsec.string "end"
+
+
 instruction :: Parser (Instruction ParserIdX)
 instruction = do
     kw <- keyword
     case kw of
         -- control instructions
-        Keyword "block"         -> return Nop
-        Keyword "loop"          -> return Nop
-        Keyword "if"            -> return Nop
+        Keyword "block"         -> block
+        Keyword "loop"          -> loop
+        Keyword "if"            -> conditional
         Keyword "unreachable"   -> return Unreachable
         Keyword "nop"           -> return Nop
-        Keyword "br"            -> return Nop
-        Keyword "br_if"         -> return Nop
+        Keyword "br"            -> do
+            labelidx <- leftPad $ Parsec.try unsignedInteger <|> identifier
+            return (Br $ parserIdX labelidx)
+        Keyword "br_if"         -> do
+            labelidx <- leftPad $ Parsec.try unsignedInteger <|> identifier
+            return (BrIf $ parserIdX labelidx)
         Keyword "br_table"      -> return Nop
         Keyword "return"        -> return Return
-        Keyword "call"          -> return Nop
-        Keyword "call_indirect" -> return Nop
+        Keyword "call"          -> do
+            funcidx <- leftPad $ Parsec.try unsignedInteger <|> identifier
+            return (Call $ parserIdX funcidx)
+        Keyword "call_indirect" -> do
+            typeuse <- leftPad $ typeUse
+            return (CallIndirect typeuse)
 
         -- parametric intsructions
         Keyword "drop"          -> return Drop
@@ -659,6 +723,7 @@ instruction = do
         Keyword "i64.reinterpret_f64" -> return (I64ReinterpretF64)
         Keyword "f32.reinterpret_i32" -> return (F32ReinterpretI32)
         Keyword "f64.reinterpret_i64" -> return (F64ReinterpretI64)
+        _             -> Parsec.unexpected $ ": unexpected instruction " ++ show kw
 
 
 
@@ -699,6 +764,11 @@ maybeIdToTree maybeId =
         Just id -> [toTree id]
         Nothing -> []
 
+maybeResultTypeToTree :: ResultType -> [Tree]
+maybeResultTypeToTree maybeResult =
+    case maybeResult of
+        Just result -> [toTree result]
+        Nothing -> []
 
 class ToTree a where toTree :: a -> Tree
 
@@ -756,6 +826,9 @@ instance ToTree Float where
 instance ToTree Double where
     toTree n = leaf (show n)
 
+instance ToTree String where
+    toTree str = leaf str
+
 instance ToTree ModuleName where
     toTree (ModuleName name) = leaf (show name)
 
@@ -781,24 +854,30 @@ instance ToTree Local where
 instance ToTree (Instruction ParserIdX) where
     -- control instructions
     toTree (Block label resulttype instructions id) =
-        Node "block" []
+        Node "block" $
+            maybeIdToTree label ++ maybeResultTypeToTree resulttype ++ map toTree instructions ++ maybeIdToTree id 
     toTree (Loop label resulttype instructions id) =
-        Node "loop" []
+        Node "loop" $
+            maybeIdToTree label ++ maybeResultTypeToTree resulttype ++ map toTree instructions ++ maybeIdToTree id 
     toTree (Conditional label resulttype ifInstructions ifId elseInstructions elseId) =
-        Node "if" []
+        Node "if" $
+            maybeIdToTree label ++ maybeResultTypeToTree resulttype ++ map toTree ifInstructions ++ maybeIdToTree ifId 
+                ++ case elseInstructions of
+                      i:is -> [toTree "else"] ++ map toTree elseInstructions ++ maybeIdToTree elseId
+                      []   -> []
     toTree Unreachable = leaf "unreachable"
     toTree Nop = leaf "nop"
-    toTree (Br labelIdX) =
-        Node "br" []
-    toTree (BrIf labelIdX) =
-        Node "br_if" []
-    toTree (BrTable labelIdXs labelIdX) =
+    toTree (Br labelidx) =
+        Node "br" [idxToTree labelidx]
+    toTree (BrIf labelidx) =
+        Node "br_if" [idxToTree labelidx]
+    toTree (BrTable labelidxs labelidx) =
         Node "br_table" []
     toTree Return = leaf "return"
-    toTree (Call funcIdX) =
-        Node "call" []
-    toTree (CallIndirect typeUse) =
-        Node "call_indirect" []
+    toTree (Call funcidx) =
+        Node "call" [idxToTree funcidx]
+    toTree (CallIndirect typeuse) =
+        Node "call_indirect" [toTree typeuse]
     toTree Drop = leaf "drop"
     toTree Select = leaf "select"
 
@@ -943,6 +1022,14 @@ instance ToTree (ExportDescription ParserIdX) where
 
 -- SHOW
 
+instance Show Ident where
+    show (Ident id) = id
+
+instance Show ValType where
+    show I32 = "i32"
+    show I64 = "i64"
+    show F32 = "f32"
+    show F64 = "f64"
 
 instance Show Signedness where
     show Signed   = "_s"

@@ -8,12 +8,16 @@
   ;; if .. else .. end
   unreachable
   nop
-  ;; br
-  ;; br_if
+  br 1
+  br $labelId 
+  br_if 1
+  br_if $lableId 
   ;; br_table
   return
-  ;; call
-  ;; call_indirect
+  call 1
+  call $funcId
+  call_indirect (type 1)
+  call_indirect (type 1) (param i32) (result i32)
   drop
   select
   local.get 1

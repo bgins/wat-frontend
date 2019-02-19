@@ -23,7 +23,7 @@ data Token = Keyword String
            | Id String
            | OpenParen
            | CloseParen
-           | Reserved String
+           | Reserved String deriving (Eq)
 
 
 instance Show Token where
