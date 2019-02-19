@@ -747,19 +747,6 @@ leaf    :: String -> Tree
 leaf str = Node str []
 
 
-idxToTree :: ParserIdX -> Tree
-idxToTree idx =
-    case idx of
-        Left n   -> toTree n
-        Right id -> toTree id
-
-
-maybeIdToTree :: MaybeIdent -> [Tree]
-maybeIdToTree maybeId =
-    case maybeId of
-        Just id -> [toTree id]
-        Nothing -> []
-
 maybeResultTypeToTree :: ResultType -> [Tree]
 maybeResultTypeToTree maybeResult =
     case maybeResult of
@@ -770,21 +757,21 @@ class ToTree a where toTree :: a -> Tree
 
 instance ToTree (Module ParserIdX) where
     toTree (Module maybeId components) =
-        Node "module" $ maybeIdToTree maybeId ++ map toTree components
+        Node ("module" ++ showMaybeId maybeId) $ map toTree components
 
 instance ToTree (Component ParserIdX) where
     toTree (Type maybeId functype) =
-        Node "type" $ maybeIdToTree maybeId ++ [toTree functype]
+        Node ("type" ++ showMaybeId maybeId) $ [toTree functype]
     toTree (Import mod name importdesc) =
-        Node "import" [toTree mod, toTree name, toTree importdesc]
+        Node ("import"  ++ show mod ++ show name) $ [toTree importdesc]
     toTree (Func maybeId typeuse locals instructions) =
-        Node "func" $ maybeIdToTree maybeId ++  [toTree typeuse] ++ map toTree locals ++ map toTree instructions
+        Node ("func" ++ showMaybeId maybeId) $ [toTree typeuse] ++ map toTree locals ++ map toTree instructions
     toTree (Global maybeId globaltype instructions) =
-        Node "global" $ maybeIdToTree maybeId ++ [toTree globaltype] ++ map toTree instructions
+        Node ("global" ++ showMaybeId maybeId) $ [toTree globaltype] ++ map toTree instructions
     toTree (Start funcidx) =
-        Node "start" [idxToTree funcidx]
+        leaf $ "start"  ++ showIdX funcidx
     toTree (Export name exportdesc) =
-        Node "export" [toTree name, toTree exportdesc]
+        Node ("export" ++ show name) $ [toTree exportdesc]
 
 instance ToTree FuncType where
     toTree (FuncType params results) =
@@ -792,11 +779,11 @@ instance ToTree FuncType where
 
 instance ToTree Param where
     toTree (Param maybeId valtype) =
-        Node "param" $ maybeIdToTree maybeId ++ [toTree valtype]
+        leaf $ "param" ++ showMaybeId maybeId ++ show valtype
 
 instance ToTree Result where
     toTree (Result valtype) =
-        Node "result" [toTree valtype]
+        leaf $ "result" ++ show valtype
 
 instance ToTree Ident where
     toTree (Ident id) = leaf id
@@ -809,69 +796,55 @@ instance ToTree ValType where
 
 instance ToTree GlobalType where
     toTree (GlobalVar valtype) =
-        Node "mut" [toTree valtype]
+        leaf $ "mut" ++ show valtype
     toTree (GlobalConst valtype) =
-        Node "const" [toTree valtype]
-
-instance ToTree Int where
-    toTree n = leaf (show n)
-
-instance ToTree Float where
-    toTree n = leaf (show n)
-
-instance ToTree Double where
-    toTree n = leaf (show n)
+        leaf $ "const" ++ show valtype
 
 instance ToTree String where
     toTree str = leaf str
 
-instance ToTree ModuleName where
-    toTree (ModuleName name) = leaf (show name)
-
-instance ToTree Name where
-    toTree (Name name) = leaf (show name)
-
 instance ToTree (ImportDescription ParserIdX) where
     toTree (FuncImport maybeId typeuse) =
-        Node "func" $ maybeIdToTree maybeId ++ [toTree typeuse]
+        Node ("func" ++ showMaybeId maybeId) $ [toTree typeuse]
 
 instance ToTree (TypeUse ParserIdX) where
     toTree (TypeUse typeidx) =
-        Node "typuse" [idxToTree typeidx]
+        leaf $ "typuse" ++ showIdX typeidx
     toTree (TypeUseWithDeclarations typeidx params results) =
-        Node "typuse" $ (idxToTree typeidx) : map toTree params ++ map toTree results
+        Node ("typuse" ++ showIdX typeidx) $ map toTree params ++ map toTree results
     toTree (InlineType params results) =
         Node "typuse" $ map toTree params ++ map toTree results
 
 instance ToTree Local where
     toTree (Local maybeId valtype) =
-        Node "local" $ maybeIdToTree maybeId ++ [toTree valtype]
+        leaf $ "local" ++ showMaybeId maybeId ++ show valtype
 
 instance ToTree (Instruction ParserIdX) where
     -- control instructions
     toTree (Block label resulttype instructions id) =
-        Node "block" $
-            maybeIdToTree label ++ maybeResultTypeToTree resulttype ++ map toTree instructions ++ maybeIdToTree id 
+        Node ("block" ++ showMaybeId label)
+            $ maybeResultTypeToTree resulttype ++ map toTree instructions ++ maybeIdToTree id 
     toTree (Loop label resulttype instructions id) =
-        Node "loop" $
-            maybeIdToTree label ++ maybeResultTypeToTree resulttype ++ map toTree instructions ++ maybeIdToTree id 
-    toTree (Conditional label resulttype ifInstructions ifId elseInstructions elseId) =
-        Node "if" $
-            maybeIdToTree label ++ maybeResultTypeToTree resulttype ++ map toTree ifInstructions ++ maybeIdToTree ifId 
+        Node ("loop" ++ showMaybeId label)
+            $ maybeResultTypeToTree resulttype ++ map toTree instructions ++ maybeIdToTree id 
+    toTree (Conditional label resulttype ifInstructions elseId elseInstructions endId) =
+        Node ("if" ++ showMaybeId label)
+            $ maybeResultTypeToTree resulttype ++ map toTree ifInstructions
                 ++ case elseInstructions of
-                      i:is -> [toTree "else"] ++ map toTree elseInstructions ++ maybeIdToTree elseId
-                      []   -> []
+                      i:is -> [toTree "else"] ++ maybeIdToTree elseId
+                          ++ map toTree elseInstructions ++ maybeIdToTree endId
+                      []   -> maybeIdToTree endId
     toTree Unreachable = leaf "unreachable"
     toTree Nop = leaf "nop"
     toTree (Br labelidx) =
-        Node "br" [idxToTree labelidx]
+        leaf $ "br" ++ showIdX labelidx
     toTree (BrIf labelidx) =
-        Node "br_if" [idxToTree labelidx]
+        leaf $ "br_if" ++ showIdX labelidx
     toTree (BrTable labelidxs labelidx) =
         Node "br_table" []
     toTree Return = leaf "return"
     toTree (Call funcidx) =
-        Node "call" [idxToTree funcidx]
+        leaf $ "call" ++ showIdX funcidx
     toTree (CallIndirect typeuse) =
         Node "call_indirect" [toTree typeuse]
     toTree Drop = leaf "drop"
@@ -879,27 +852,27 @@ instance ToTree (Instruction ParserIdX) where
 
     -- variable instructions
     toTree (LocalGet localidx) =
-        Node "local.get" [idxToTree localidx]
+        leaf $ "local.get" ++ showIdX localidx
     toTree (LocalSet localidx) =
-        Node "local.set" [idxToTree localidx]
+        leaf $ "local.set" ++ showIdX localidx
     toTree (LocalTee localidx) =
-        Node "local.tee" [idxToTree localidx]
+        leaf $ "local.tee" ++ showIdX localidx
     toTree (GlobalGet globalidx) =
-        Node "global.get" [idxToTree globalidx]
+        leaf $ "global.get" ++ showIdX globalidx
     toTree (GlobalSet globalidx) =
-        Node "global.set" [idxToTree globalidx]
+        leaf $ "global.set" ++ showIdX globalidx
 
     -- add memory instructions
 
     -- numeric instructions
     toTree (I32Const n) =
-        Node "i32.const" [toTree n]
+        leaf $ "i32.const" ++ showInt n
     toTree (I64Const n) =
-        Node "i64.const" [toTree n]
+        leaf $ "i64.const" ++ showInt n
     toTree (F32Const n) =
-        Node "f32.const" [toTree n]
+        leaf $ "f32.const" ++ showFloat n
     toTree (F64Const n) =
-        Node "f64.const" [toTree n]
+        leaf $ "f64.const" ++ showDouble n
 
     toTree I32Clz        = leaf "i32.clz"
     toTree I32Ctz        = leaf "i32.ctz"
@@ -1012,24 +985,69 @@ instance ToTree (Instruction ParserIdX) where
 
 instance ToTree (ExportDescription ParserIdX) where
     toTree (FuncExport funcidx) =
-        Node "func" [idxToTree funcidx]
+        leaf $ "func" ++ showIdX funcidx
 
 
 
 -- SHOW
 
+
 instance Show Ident where
     show (Ident id) = id
 
 instance Show ValType where
-    show I32 = "i32"
-    show I64 = "i64"
-    show F32 = "f32"
-    show F64 = "f64"
+    show I32 = ' ' : "i32"
+    show I64 = ' ' : "i64"
+    show F32 = ' ' : "f32"
+    show F64 = ' ' : "f64"
+
+instance Show ModuleName where
+    show (ModuleName name) = ' ' : show name
+
+instance Show Name where
+    show (Name name) = ' ' : show name
 
 instance Show Signedness where
     show Signed   = "_s"
     show Unsigned = "_u"
+
+
+showIdX :: ParserIdX -> String
+showIdX idx =
+    case idx of
+        Left n   -> ' ' : show n
+        Right id -> ' ' : show id
+
+
+maybeIdToTree :: MaybeIdent -> [Tree]
+maybeIdToTree maybeId =
+    case maybeId of
+        Just id -> [toTree id]
+        Nothing -> []
+
+
+showMaybeId :: MaybeIdent -> String
+showMaybeId maybeId =
+    case maybeId of
+        Just id -> ' ' : show id
+        Nothing -> ""
+
+
+showInt :: Int -> String
+showInt n =
+    ' ' : show n
+
+showFloat :: Float -> String
+showFloat n =
+    ' ' : show n
+
+showDouble :: Double -> String
+showDouble n =
+    ' ' : show n
+
+
+
+-- IO
 
 
 indentTree :: FilePath -> Int -> Tree -> IO ()
