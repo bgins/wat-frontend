@@ -256,11 +256,7 @@ typeUse = do
                             return (TypeUse typeidx)
                         else
                             return (TypeUseWithDeclarations typeidx ps rs)
-        Nothing      -> if ps /= [] || rs /= [] then
-                            return (InlineType ps rs)
-                        else
-                            Parsec.unexpected $ "A func component must have have a type reference\
-                                                   \ or an inline type signature"
+        Nothing      ->  return (InlineType ps rs)
 
 
 typeRef :: Parser ParserIdX
