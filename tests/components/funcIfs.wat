@@ -1,11 +1,11 @@
 (module
   (func $funcId (type 1) (param i32) (result i32)
-  if $label1 (result i32)
+  if $labelA (result i32)
     i32.const 1
-  else $label1
+  else $labelA
     i32.const 1
-  end $label1
-  if $label2 (result i32)
+  end $labelA
+  if $labelB (result i32)
     i32.const 1
   else
     i32.const 1
@@ -20,8 +20,8 @@
   else
     i32.const 1
   end
-  if $label3 (result i32)
+  if $labelC (result i32)
     i32.const 1
-  end $label3
+  end $labelC
   )
 )

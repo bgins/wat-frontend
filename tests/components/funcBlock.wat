@@ -1,16 +1,16 @@
 (module
   (func $funcId (type 1) (param i32) (result i32)
-  block $blockLabel1 (result i32)
+  block $blockLabelA (result i32)
     i32.const 1
     i32.const 2
     i32.add
-  end $blockLabel1
-  block $blockLabel2 (result i32)
+  end $blockLabelA
+  block $blockLabelB (result i32)
     i32.const 1
     i32.const 2
     i32.add
   end
-  block $blockLabel3
+  block $blockLabelC
     i32.const 1
     i32.const 2
     i32.add

@@ -496,31 +496,32 @@ loop = do
         Parsec.unexpected $ ": loop label and trailing id must match"
 
 
-conditional :: Parser (Instruction ParserIdX)
-conditional = do
+ifElseEnd :: Parser (Instruction ParserIdX)
+ifElseEnd = do
     label <- leftPad $ Parsec.optionMaybe identifier
     resulttype <- leftPad $ Parsec.optionMaybe (betweenParens result)
-    ifinstrs <- Parsec.manyTill (leftPad $ instruction) (Parsec.try endOrElse)
+    ifinstrs <- Parsec.manyTill (leftPad $ instruction) (Parsec.try $ (leftPad $ Parsec.string "else"))
     firstId <- leftPad $ Parsec.optionMaybe identifier
-    elseinstrs <- leftPad $ Parsec.option [] elseInstructions
+    elseinstrs <- Parsec.manyTill (leftPad $ instruction) (Parsec.try $ end)
     secondId <- leftPad $ Parsec.optionMaybe identifier
-    if (label == firstId && firstId == secondId)
+    if firstId == Nothing
        || (label == firstId && secondId == Nothing)
-       || (label == secondId && firstId == Nothing)
-       || (firstId == Nothing && secondId == Nothing) then
+       || label == secondId then
         return (Conditional (identify label) resulttype ifinstrs (identify firstId) elseinstrs (identify secondId))
     else
         Parsec.unexpected $ ": if label and trailing ids must match"
 
 
-elseInstructions :: Parser (Instructions ParserIdX)
-elseInstructions = do
-    Parsec.manyTill (leftPad $ instruction) (Parsec.try end)
-
-
-endOrElse :: Parser String
-endOrElse = do
-    leftPad $ Parsec.try (Parsec.string "end") <|> Parsec.string "else"
+ifEnd :: Parser (Instruction ParserIdX)
+ifEnd = do
+    label <- leftPad $ Parsec.optionMaybe identifier
+    resulttype <- leftPad $ Parsec.optionMaybe (betweenParens result)
+    ifinstrs <- Parsec.manyTill (leftPad $ instruction) (Parsec.try end)
+    id <- leftPad $ Parsec.optionMaybe identifier
+    if label == id || id == Nothing then
+        return (Conditional (identify label) resulttype ifinstrs (identify id) [] Nothing)
+    else
+        Parsec.unexpected $ ": if label and trailing ids must match"
 
 
 end :: Parser String
@@ -535,7 +536,7 @@ instruction = do
         -- control instructions
         Keyword "block"         -> block
         Keyword "loop"          -> loop
-        Keyword "if"            -> conditional
+        Keyword "if"            -> Parsec.try ifElseEnd <|> ifEnd
         Keyword "unreachable"   -> return Unreachable
         Keyword "nop"           -> return Nop
         Keyword "br"            -> do
