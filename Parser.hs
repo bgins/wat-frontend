@@ -12,20 +12,14 @@ import Lexer hiding (runTest)
 
 -- PARSE
 
+
 type ParserIdX = Either Int Ident
 
 parse :: Parser (Module ParserIdX)
 parse = do
-    m <- wrapSpace $ betweenParens wasmModule
+    m <- wrapSpace $ betweenParens parseModule
     Parsec.eof
     return m
-
-
-parserIdX :: Token -> ParserIdX
-parserIdX token =
-    case token of
-        UIntLit n -> Left n  -- TODO: check this is u32
-        Id id     -> Right (Ident id)  -- TODO: check for it in identifier context
 
 
 betweenParens :: Parser a -> Parser a
@@ -46,11 +40,23 @@ leftPad p =
     whitespace >> p
 
 
+
+-- TOKEN CONVERSIONS
+
+
 toInt :: Token -> Int
 toInt token =
     case token of
         UIntLit num -> num
         SIntLit num -> num
+
+
+toIdent :: Maybe Token -> Maybe Ident
+toIdent id =
+    case id of
+        Just (Id id) -> Just (Ident id)
+        Nothing      -> Nothing
+
 
 toModuleName :: Token -> ModuleName
 toModuleName token =
@@ -64,33 +70,18 @@ toName token =
         StringLit str -> Name str
 
 
-identify :: Maybe Token -> Maybe Ident
-identify id =
-    case id of
-        Just (Id id) -> Just (Ident id)
-        Nothing      -> Nothing
+parserIdX :: Token -> ParserIdX
+parserIdX token =
+    case token of
+        UIntLit n -> Left n
+        Id id     -> Right (Ident id)
 
 
--- MODULE
+
+-- MODULE [§6.6.13]
 
 
 data Module id = Module MaybeIdent (Components id)
-
-wasmModule :: Parser (Module ParserIdX)
-wasmModule = do
-    mod <- Parsec.lookAhead closeParen <|> keyword
-    case mod of
-        Keyword "module" -> do
-            id <- leftPad $ Parsec.optionMaybe identifier
-            cs <- wrapSpace $ components
-            return (Module (identify id) cs)
-        CloseParen       -> return (Module Nothing [])
-        _                -> failStartsWithOrEmpty "module" "module" mod
-
-
-
--- COMPONENTS
-
 
 type Components id = [Component id]
 
@@ -101,6 +92,18 @@ data Component id = Type MaybeIdent FuncType
                   | Global MaybeIdent GlobalType (Instructions id)
                   | Export Name (ExportDescription id)
 
+parseModule :: Parser (Module ParserIdX)
+parseModule = do
+    mod <- Parsec.lookAhead closeParen <|> keyword
+    case mod of
+        Keyword "module" -> do
+            maybeId <- leftPad $ Parsec.optionMaybe identifier
+            cs <- wrapSpace $ components
+            return (Module (toIdent maybeId) cs)
+        CloseParen       -> return (Module Nothing [])
+        _                -> failStartsWithOrEmpty "module" "module" mod
+
+
 components :: Parser (Components ParserIdX)
 components =
     Parsec.sepEndBy (betweenParens component) whitespace
@@ -110,53 +113,17 @@ component :: Parser (Component ParserIdX)
 component = do
     kw <- keyword
     case kw of
-        Keyword "type" -> do
-            id <- wrapSpace $ Parsec.optionMaybe identifier
-            ft <- betweenParens funcType
-            return (Type (identify id) ft)
-        Keyword "import" -> do
-            mod <- leftPad $ string
-            nm <- leftPad $ string
-            impdesc <- leftPad $ betweenParens importdesc
-            return (Import (toModuleName mod) (toName nm) impdesc)
-        Keyword "func" -> do
-            id <- wrapSpace $ Parsec.optionMaybe identifier
-            typeuse <- typeUse
-            locals <- locals
-            instructions <- instructions
-            return (Func (identify id) typeuse locals instructions)
-        Keyword "start" -> do
-            funcidx <- leftPad $ Parsec.try unsignedInteger <|> identifier
-            return (Start $ parserIdX funcidx)
-        Keyword "global" -> do
-            id <- leftPad $ Parsec.optionMaybe identifier
-            globaltype <- wrapSpace $ globalType
-            instructions <- leftPad $ instructions
-            return (Global (identify id) globaltype instructions)
-        Keyword "export" -> do
-            nm <- leftPad $ string
-            expdesc <- leftPad $ betweenParens exportdesc
-            return (Export (toName nm) expdesc)
-        _              -> failStartsWith "component" "type or func" kw
+        Keyword "type"   -> parseType
+        Keyword "import" -> parseImport
+        Keyword "func"   -> parseFunc
+        Keyword "start"  -> parseStart
+        Keyword "global" -> parseGlobal
+        Keyword "export" -> parseExport
+        _                -> failStartsWith "component" "type, import, func, start, global, or export" kw
 
 
 
-
--- TYPES
-
-
-data FuncType = FuncType Params Results
-
-data GlobalType = GlobalConst ValType
-                | GlobalVar ValType
-
-type Params = [Param]
-
-data Param = Param MaybeIdent ValType deriving (Eq)
-
-type Results = [Result]
-
-data Result = Result ValType deriving (Eq)
+-- IDENTIFIERS [§6.6.1], VALUE TYPES [§6.4.1], PARAMS [§6.4.3], RESULTS [§6.4.3]
 
 data Ident = Ident String deriving (Eq)
 
@@ -167,16 +134,26 @@ data ValType = I32
              | F32
              | F64 deriving (Eq)
 
-funcType :: Parser FuncType
-funcType = do
+data Param = Param MaybeIdent ValType deriving (Eq)
+
+type Params = [Param]
+
+data Result = Result ValType deriving (Eq)
+
+type Results = [Result]
+
+
+valType :: Parser ValType
+valType = do
     kw <- keyword
     case kw of
-        Keyword "func" -> do
-            ps <- wrapSpace $ Parsec.sepEndBy (Parsec.try $ betweenParens param) whitespace
-            rs <- Parsec.sepEndBy (betweenParens result) whitespace
-            return (FuncType ps rs)
-        CloseParen       -> return (FuncType [] [])
-        _                -> failStartsWith "function type" "func" kw
+        Keyword "i32" -> return I32
+        Keyword "i64" -> return I64
+        Keyword "f32" -> return F32
+        Keyword "f64" -> return F64
+        _             -> Parsec.unexpected $
+                             ": A value type must be \"i32\", \"i64\", \"f32\", or \"f64\" keyword\
+                             \ but I am seeing \"" ++ (show kw) ++ "\""
 
 
 param :: Parser Param
@@ -185,9 +162,9 @@ param = do
     kw <- keyword
     case kw of
         Keyword "param" -> do
-            id <- leftPad $ Parsec.optionMaybe identifier
+            maybeId <- leftPad $ Parsec.optionMaybe identifier
             vt <- leftPad $ valType
-            return (Param (identify id) vt)
+            return (Param (toIdent maybeId) vt)
         _               -> failStartsWith "parameter" "param" kw
 
 
@@ -202,17 +179,33 @@ result = do
         _               -> failStartsWith "result" "result" kw
 
 
-valType :: Parser ValType
-valType = do
+
+-- TYPES [§6.4]
+
+
+data FuncType = FuncType Params Results
+
+data GlobalType = GlobalConst ValType
+                | GlobalVar ValType
+
+
+parseType :: Parser (Component ParserIdX)
+parseType = do
+    maybeId <- wrapSpace $ Parsec.optionMaybe identifier
+    ft <- betweenParens funcType
+    return (Type (toIdent maybeId) ft)
+
+
+funcType :: Parser FuncType
+funcType = do
     kw <- keyword
     case kw of
-        Keyword "i32" -> return I32
-        Keyword "i64" -> return I64
-        Keyword "f32" -> return F32
-        Keyword "f64" -> return F64
-        _             -> Parsec.unexpected $
-                             ": A value type must be \"i32\", \"i64\", \"f32\", or \"f64\" keyword\
-                             \ but I am seeing \"" ++ (show kw) ++ "\""
+        Keyword "func" -> do
+            ps <- wrapSpace $ Parsec.sepEndBy (Parsec.try $ betweenParens param) whitespace
+            rs <- Parsec.sepEndBy (betweenParens result) whitespace
+            return (FuncType ps rs)
+        CloseParen       -> return (FuncType [] [])
+        _                -> failStartsWith "function type" "func" kw
 
 
 globalType :: Parser GlobalType
@@ -239,7 +232,7 @@ globalVar = do
 
 
 
--- TYPE USE
+-- TYPE USES [§6.6.3]
 
 
 data TypeUse id = TypeUse id
@@ -270,7 +263,7 @@ typeRef = do
 
 
 
--- IMPORTS
+-- IMPORTS [§6.6.4]
 
 
 data ModuleName = ModuleName String
@@ -278,20 +271,28 @@ data ModuleName = ModuleName String
 data Name = Name String
 
 data ImportDescription id = FuncImport MaybeIdent (TypeUse id)
-                       -- table, memory, and global imports go here
+                       -- add table, memory, and global imports here
+
+parseImport :: Parser (Component ParserIdX)
+parseImport = do
+    mod <- leftPad $ string
+    nm <- leftPad $ string
+    impdesc <- leftPad $ betweenParens importdesc
+    return (Import (toModuleName mod) (toName nm) impdesc)
+
 
 importdesc :: Parser (ImportDescription ParserIdX)
 importdesc = do
     kw <- keyword
     case kw of
         Keyword "func" -> do
-            id <- leftPad $ Parsec.optionMaybe identifier
+            maybeId <- leftPad $ Parsec.optionMaybe identifier
             typeuse <- leftPad $ typeUse
-            return (FuncImport (identify id) typeuse)
+            return (FuncImport (toIdent maybeId) typeuse)
 
 
 
--- FUNCS
+-- FUNCS [§6.6.5]
 
 
 type Locals = [Local]
@@ -303,6 +304,8 @@ type Instructions id = [Instruction id]
 data Signedness = Signed
                 | Unsigned
 
+
+                    -- control instructions [§6.5.2]
 data Instruction id = Block MaybeIdent ResultType (Instructions id) MaybeIdent
                     | Loop MaybeIdent ResultType (Instructions id) MaybeIdent
                     | Conditional MaybeIdent ResultType (Instructions id) MaybeIdent (Instructions id) MaybeIdent
@@ -315,20 +318,20 @@ data Instruction id = Block MaybeIdent ResultType (Instructions id) MaybeIdent
                     | Call id
                     | CallIndirect (TypeUse id)
 
-                    -- parametric instructions
+                    -- parametric instructions [§6.5.3]
                     | Drop
                     | Select
 
-                    -- variable instructions
+                    -- variable instructions [§6.5.4]
                     | LocalGet id
                     | LocalSet id
                     | LocalTee id
                     | GlobalGet id
                     | GlobalSet id
 
-                    -- add memory instructions
+                    -- add memory instructions [§6.5.5]
 
-                    -- numeric instructions
+                    -- numeric instructions [§6.5.6]
                     | I32Const Int
                     | I64Const Int
                     | F32Const Float
@@ -446,6 +449,16 @@ data Instruction id = Block MaybeIdent ResultType (Instructions id) MaybeIdent
 
 type ResultType = Maybe Result
 
+
+parseFunc :: Parser (Component ParserIdX)
+parseFunc = do
+    maybeId <- wrapSpace $ Parsec.optionMaybe identifier
+    typeuse <- typeUse
+    locals <- locals
+    instructions <- instructions
+    return (Func (toIdent maybeId) typeuse locals instructions)
+
+
 locals :: Parser Locals
 locals =
     concat <$> Parsec.sepEndBy (betweenParens local) whitespace
@@ -456,84 +469,28 @@ local = do
     kw <- keyword
     case kw of
         Keyword "local" -> do
-            id <- leftPad $ Parsec.optionMaybe identifier
-            case id of
+            maybeId <- leftPad $ Parsec.optionMaybe identifier
+            case maybeId of
                 Just _ -> do
                     vt <- leftPad $ valType
-                    return ([Local (identify id) vt])
+                    return ([Local (toIdent maybeId) vt])
                 Nothing -> do
                     vts <- Parsec.sepEndBy valType whitespace
                     return (map (Local Nothing) vts)
         _              -> failStartsWith "local" "local" kw
 
 
+-- instructions [§6.5]
 instructions :: Parser (Instructions ParserIdX)
 instructions =
     Parsec.sepEndBy instruction whitespace
-
-
-block :: Parser (Instruction ParserIdX)
-block = do
-    label <- leftPad $ Parsec.optionMaybe identifier
-    resulttype <- leftPad $ Parsec.optionMaybe (betweenParens result)
-    instructions <- Parsec.manyTill (leftPad $ instruction) (Parsec.try end)
-    id <- leftPad $ Parsec.optionMaybe identifier
-    if label == id || id == Nothing then
-        return (Block (identify label) resulttype instructions (identify id))
-    else
-        Parsec.unexpected $ ": block label and trailing id must match"
-
-
-loop :: Parser (Instruction ParserIdX)
-loop = do
-    label <- leftPad $ Parsec.optionMaybe identifier
-    resulttype <- leftPad $ Parsec.optionMaybe (betweenParens result)
-    instructions <- Parsec.manyTill (leftPad $ instruction) (Parsec.try end)
-    id <- leftPad $ Parsec.optionMaybe identifier
-    if label == id || id == Nothing then
-        return (Loop (identify label) resulttype instructions (identify id))
-    else
-        Parsec.unexpected $ ": loop label and trailing id must match"
-
-
-ifElseEnd :: Parser (Instruction ParserIdX)
-ifElseEnd = do
-    label <- leftPad $ Parsec.optionMaybe identifier
-    resulttype <- leftPad $ Parsec.optionMaybe (betweenParens result)
-    ifinstrs <- Parsec.manyTill (leftPad $ instruction) (Parsec.try $ (leftPad $ Parsec.string "else"))
-    firstId <- leftPad $ Parsec.optionMaybe identifier
-    elseinstrs <- Parsec.manyTill (leftPad $ instruction) (Parsec.try $ end)
-    secondId <- leftPad $ Parsec.optionMaybe identifier
-    if firstId == Nothing
-       || (label == firstId && secondId == Nothing)
-       || label == secondId then
-        return (Conditional (identify label) resulttype ifinstrs (identify firstId) elseinstrs (identify secondId))
-    else
-        Parsec.unexpected $ ": if label and trailing ids must match"
-
-
-ifEnd :: Parser (Instruction ParserIdX)
-ifEnd = do
-    label <- leftPad $ Parsec.optionMaybe identifier
-    resulttype <- leftPad $ Parsec.optionMaybe (betweenParens result)
-    ifinstrs <- Parsec.manyTill (leftPad $ instruction) (Parsec.try end)
-    id <- leftPad $ Parsec.optionMaybe identifier
-    if label == id || id == Nothing then
-        return (Conditional (identify label) resulttype ifinstrs (identify id) [] Nothing)
-    else
-        Parsec.unexpected $ ": if label and trailing ids must match"
-
-
-end :: Parser String
-end = do
-    leftPad $ Parsec.string "end"
 
 
 instruction :: Parser (Instruction ParserIdX)
 instruction = do
     kw <- keyword
     case kw of
-        -- control instructions
+        -- control instructions [§6.5.2]
         Keyword "block"         -> block
         Keyword "loop"          -> loop
         Keyword "if"            -> Parsec.try ifElseEnd <|> ifEnd
@@ -545,7 +502,7 @@ instruction = do
         Keyword "br_if"         -> do
             labelidx <- leftPad $ Parsec.try unsignedInteger <|> identifier
             return (BrIf $ parserIdX labelidx)
-        Keyword "br_table"      -> return Nop
+        Keyword "br_table"      -> Parsec.unexpected ": \"br_table\" not implemented"
         Keyword "return"        -> return Return
         Keyword "call"          -> do
             funcidx <- leftPad $ Parsec.try unsignedInteger <|> identifier
@@ -554,11 +511,11 @@ instruction = do
             typeuse <- leftPad $ typeUse
             return (CallIndirect typeuse)
 
-        -- parametric intsructions
+        -- parametric instructions [§6.5.3]
         Keyword "drop"          -> return Drop
         Keyword "select"        -> return Select
 
-        -- variable instructions
+        -- variable instructions [§6.5.4]
         Keyword "local.get"     -> do
             localidx <- leftPad $ Parsec.try unsignedInteger <|> identifier
             return (LocalGet $ parserIdX localidx)
@@ -575,9 +532,9 @@ instruction = do
             localidx <- leftPad $ Parsec.try unsignedInteger <|> identifier
             return (GlobalSet $ parserIdX localidx)
 
-        -- add memory instructions
+        -- add memory instructions [§6.5.5]
 
-        -- numeric instructions
+        -- numeric instructions [§6.5.6]
         Keyword "i32.const"           -> do
             int <- leftPad $ signedInteger <|> unsignedInteger
             return (I32Const $ toInt int)
@@ -723,12 +680,98 @@ instruction = do
         _             -> Parsec.unexpected $ ": unexpected instruction " ++ show kw
 
 
+block :: Parser (Instruction ParserIdX)
+block = do
+    maybeLabel <- leftPad $ Parsec.optionMaybe identifier
+    resulttype <- leftPad $ Parsec.optionMaybe (betweenParens result)
+    instructions <- Parsec.manyTill (leftPad $ instruction) (Parsec.try end)
+    maybeId <- leftPad $ Parsec.optionMaybe identifier
+    if maybeLabel == maybeId || maybeId == Nothing then
+        return (Block (toIdent maybeLabel) resulttype instructions (toIdent maybeId))
+    else
+        Parsec.unexpected $ ": block label and trailing id must match"
 
--- IMPORTS
+
+loop :: Parser (Instruction ParserIdX)
+loop = do
+    maybeLabel <- leftPad $ Parsec.optionMaybe identifier
+    resulttype <- leftPad $ Parsec.optionMaybe (betweenParens result)
+    instructions <- Parsec.manyTill (leftPad $ instruction) (Parsec.try end)
+    maybeId <- leftPad $ Parsec.optionMaybe identifier
+    if maybeLabel == maybeId || maybeId == Nothing then
+        return (Loop (toIdent maybeLabel) resulttype instructions (toIdent maybeId))
+    else
+        Parsec.unexpected $ ": loop label and trailing id must match"
+
+
+ifElseEnd :: Parser (Instruction ParserIdX)
+ifElseEnd = do
+    maybeLabel <- leftPad $ Parsec.optionMaybe identifier
+    resulttype <- leftPad $ Parsec.optionMaybe (betweenParens result)
+    ifinstrs <- Parsec.manyTill (leftPad $ instruction) (Parsec.try $ (leftPad $ Parsec.string "else"))
+    maybeElseId <- leftPad $ Parsec.optionMaybe identifier
+    elseinstrs <- Parsec.manyTill (leftPad $ instruction) (Parsec.try $ end)
+    maybeEndId <- leftPad $ Parsec.optionMaybe identifier
+    if maybeElseId == Nothing
+       || (maybeLabel == maybeElseId && maybeEndId == Nothing)
+       || maybeLabel == maybeEndId then
+        return (Conditional (toIdent maybeLabel) resulttype ifinstrs (toIdent maybeElseId) elseinstrs (toIdent maybeEndId))
+    else
+        Parsec.unexpected $ ": if label and trailing ids must match"
+
+
+ifEnd :: Parser (Instruction ParserIdX)
+ifEnd = do
+    maybeLabel <- leftPad $ Parsec.optionMaybe identifier
+    resulttype <- leftPad $ Parsec.optionMaybe (betweenParens result)
+    ifinstrs <- Parsec.manyTill (leftPad $ instruction) (Parsec.try end)
+    maybeId <- leftPad $ Parsec.optionMaybe identifier
+    if maybeLabel == maybeId || maybeId == Nothing then
+        return (Conditional (toIdent maybeLabel) resulttype ifinstrs (toIdent maybeId) [] Nothing)
+    else
+        Parsec.unexpected $ ": if label and trailing ids must match"
+
+
+end :: Parser String
+end = do
+    leftPad $ Parsec.string "end"
+
+
+
+-- START [§6.6.10]
+
+
+parseStart :: Parser (Component ParserIdX)
+parseStart = do
+    funcidx <- leftPad $ Parsec.try unsignedInteger <|> identifier
+    return (Start $ parserIdX funcidx)
+
+
+
+-- GLOBALS [§6.6.8]
+
+
+parseGlobal :: Parser (Component ParserIdX)
+parseGlobal = do
+    maybeId <- leftPad $ Parsec.optionMaybe identifier
+    globaltype <- wrapSpace $ globalType
+    instructions <- leftPad $ instructions
+    return (Global (toIdent maybeId) globaltype instructions)
+
+
+
+-- EXPORTS [§6.6.9]
 
 
 data ExportDescription id = FuncExport id
-                       -- table, memory, and global exports go here
+                       -- add table, memory, and global exports here
+
+parseExport :: Parser (Component ParserIdX)
+parseExport = do
+    nm <- leftPad $ string
+    expdesc <- leftPad $ betweenParens exportdesc
+    return (Export (toName nm) expdesc)
+
 
 exportdesc :: Parser (ExportDescription ParserIdX)
 exportdesc = do
@@ -737,6 +780,7 @@ exportdesc = do
         Keyword "func" -> do
             funcidx <- leftPad $ Parsec.try unsignedInteger <|> identifier
             return (FuncExport $ parserIdX funcidx)
+
 
 
 -- TREE REPRESENTATION
@@ -867,13 +911,13 @@ instance ToTree (Instruction ParserIdX) where
 
     -- numeric instructions
     toTree (I32Const n) =
-        leaf $ "i32.const" ++ showInt n
+        leaf $ "i32.const" ++ (' ' : show n)
     toTree (I64Const n) =
-        leaf $ "i64.const" ++ showInt n
+        leaf $ "i64.const" ++ (' ' : show n)
     toTree (F32Const n) =
-        leaf $ "f32.const" ++ showFloat n
+        leaf $ "f32.const" ++ (' ' : show n)
     toTree (F64Const n) =
-        leaf $ "f64.const" ++ showDouble n
+        leaf $ "f64.const" ++ (' ' : show n)
 
     toTree I32Clz        = leaf "i32.clz"
     toTree I32Ctz        = leaf "i32.ctz"
@@ -1032,19 +1076,6 @@ showMaybeId maybeId =
     case maybeId of
         Just id -> ' ' : show id
         Nothing -> ""
-
-
-showInt :: Int -> String
-showInt n =
-    ' ' : show n
-
-showFloat :: Float -> String
-showFloat n =
-    ' ' : show n
-
-showDouble :: Double -> String
-showDouble n =
-    ' ' : show n
 
 
 
