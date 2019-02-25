@@ -12,7 +12,8 @@
   br $labelId 
   br_if 1
   br_if $lableId 
-  ;; br_table
+  ;; br_table 1
+  ;; br_table 1 $labelId
   return
   call 1
   call $funcId

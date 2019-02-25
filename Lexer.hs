@@ -17,8 +17,8 @@ type Parser = Parsec.Parsec String ()
 
 
 data Token = Keyword String
-           | UIntLit Int
-           | SIntLit Int
+           | UIntLit Integer
+           | SIntLit Integer
            | StringLit String
            | Id String
            | OpenParen
@@ -125,34 +125,34 @@ negativeInteger = do
     return (SIntLit (- sN))
 
 
-hexnum :: Parser Int
+hexnum :: Parser Integer
 hexnum = do
     Parsec.try (Parsec.string "0x")
     hds <- digits Parsec.hexDigit
     return (fromDigits 16 hds)
 
 
-num :: Parser Int
+num :: Parser Integer
 num = do
   ds <- digits Parsec.digit
   return (fromDigits 10 ds)
 
 
-digits :: Parser Char -> Parser [Int]
+digits :: Parser Char -> Parser [Integer]
 digits digitParser = do
     d <- digitToInt <$> digitParser
     ds <- Parsec.many (digit digitParser)
-    return (d:ds)
+    return (toInteger d:ds)
 
 
-digit :: Parser Char -> Parser Int
+digit :: Parser Char -> Parser Integer
 digit digitParser = do
     Parsec.optional (Parsec.char '_')
     d <- digitToInt <$> digitParser
-    return d
+    return (toInteger d)
 
 
-fromDigits :: Int -> [Int] -> Int
+fromDigits :: Integer -> [Integer] -> Integer
 fromDigits base ds =
     foldl (\num d -> base*num + d) 0 ds
 
@@ -211,13 +211,14 @@ unicodeCharacter = do
     return ("u{" ++ cs ++ "}")
 
 
-unicodeHexString :: [Int] -> Parser String
+
+unicodeHexString :: [Integer] -> Parser String
 unicodeHexString hds
-    | val < 55296                   = return hexString   -- n < 0xD800
-    | 57344 <= val && val < 1114112 = return hexString   -- 0xE000 <= n < 0x110000
+    | val < 0xD800                    = return hexString
+    | 0xE000 <= val && val < 0x110000 = return hexString
     | otherwise = Parsec.unexpected $ "Invalid unicode charater \"u{" ++ hexString ++ "}\" in string"
       where val = fromDigits 16 hds
-            hexString = map intToDigit hds
+            hexString = map (intToDigit . fromIntegral) hds
 
 
 betweenQuotes :: Parser String -> Parser String
