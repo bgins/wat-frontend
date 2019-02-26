@@ -5,7 +5,7 @@ module Parser where
 import Control.Monad (guard)
 import Data.Int (Int32, Int64)
 import Data.Word (Word32)
-import System.Directory
+import System.Directory (listDirectory)
 import qualified Text.Parsec as Parsec
 import Text.Parsec ((<|>),(<?>))
 
@@ -1141,7 +1141,8 @@ indent n =
 
 testParser :: String ->  IO ()
 testParser testDirectory = do
-    tests <- listDirectory testDirectory
+    all <- listDirectory testDirectory
+    tests <- pure $ filter (\f -> f /= "lex" && f /= "parse") all
     mapM_ (runTest testDirectory) tests
 
 
@@ -1150,13 +1151,12 @@ runTest testDirectory inputFile = do
     text <- readFile $ testFile inputFile
     case Parsec.parse parse inputFile text of
         Left err  -> writeFile errPath $ show err
-        Right out -> indentOut outPath out
+        Right out ->  indentOut outPath out
   where testName   = reverse $ drop 4 $ reverse inputFile
-        testFile s = testDirectory ++ "/" ++ s
-        path       = testFile testName
-        errPath    = path ++ ".err"
-        outPath    = path ++ ".out"
-
+        testFile s = testDirectory ++ s
+        path       = testFile $ "parse/" ++ testName
+        errPath    = path ++ ".ast.err"
+        outPath    = path ++ ".ast.out"
 
 
 -- ERRORS

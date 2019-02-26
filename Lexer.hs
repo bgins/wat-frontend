@@ -2,11 +2,11 @@ module Lexer where
 
 import Control.Monad (void)
 import Data.Char as Char
-import Numeric (readHex)
+import Data.List (isSuffixOf)
 import Prelude hiding (lex)
 import qualified Text.Parsec as Parsec
 import Text.Parsec ((<|>))
-import System.Directory
+import System.Directory (listDirectory)
 
 import Keywords
 
@@ -335,16 +335,19 @@ inBlockComment = do
 
 testLexer :: String -> IO ()
 testLexer testDirectory = do
-    tests <- listDirectory testDirectory
+    all <- listDirectory testDirectory
+    tests <- pure $ filter (\f -> f /= "lex" && f /= "parse") all
     mapM_ (runTest testDirectory) tests
 
 
 runTest :: String -> String -> IO ()
 runTest testDirectory inputFile = do
-    text <- readFile $ testDirectory ++ "/" ++ inputFile
+    text <- readFile $ testFile inputFile
     case Parsec.parse lex inputFile text of
         Left err  -> writeFile errPath $ show err
-        Right out  -> writeFile outPath $ show out
-  where testName = reverse $ drop 4 $ reverse inputFile
-        errPath = testDirectory ++ "/" ++ testName ++ ".err"
-        outPath = testDirectory ++ "/" ++ testName ++ ".out"
+        Right out -> writeFile outPath $ show out
+  where testName   = reverse $ drop 4 $ reverse inputFile
+        testFile s = testDirectory ++ s
+        path       = testFile $ "lex/" ++ testName
+        errPath    = path ++ ".toks.err"
+        outPath    = path ++ ".toks.out"

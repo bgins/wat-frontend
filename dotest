@@ -1,0 +1,95 @@
+#!/bin/bash
+#
+# Automated regression test driver for wat-frontend
+#
+# Place tests in a directory and create subdirectories for each phase to be
+# tested. (At the moment "lex" and "parse" subdirectories are expected.)
+#
+# To lex a "components" directory (for example), execute
+#     ./dotest lex tests/components/
+#
+# To parse the same directory, execute
+#     ./dotest parse tests/components/
+#
+# The test results are output to the "lex" subdirectory as "x.toks.out" and
+# "x.toks.err" or "parse" subdirectory as "x.ast.out" and "x.ast.err" for some
+# test "x.wat" (WebAssembly text) or "x.tok" (plain tokens).
+#
+# If baseline ".expect" files exist, the results are diffed against them. Otherwise,
+# baseline files are created from the output files. An empty baseline test means
+# a result is not expected (and the result in the corresponding error or output file
+# is expected instead).
+#
+# Note that the test directories must contain only ".tok" files for token tests or
+# ".wat" files for WebAssembly text tests. This script _will_ run on any file in the
+# directory.
+
+
+run_tests () {
+  local source_dir=$1
+  local output_dir=$2
+  local result=$3
+
+  for file in $source_dir*
+  do
+    if [ -f $file ]
+      then
+        if [ $source_dir = "tests/tokens/" ]
+          then
+            local test=`basename $file .tok`
+        else
+          local test=`basename $file .wat`
+        fi
+
+        # touch ouputs or create them (the parser deletes all previous results)
+        touch $output_dir/$test.$result.out
+        touch $output_dir/$test.$result.err
+
+        # diff with expected results or copy results to set expectations
+        echo $test:
+        if [ -r $output_dir/$test.$result.out.expect ]
+          then
+            diff $output_dir/$test.$result.out.expect $output_dir/$test.$result.out
+        else
+          cp $output_dir/$test.$result.out $output_dir/$test.$result.out.expect
+        fi
+        if [ -r $output_dir/$test.$result.err.expect ]
+          then
+            diff $output_dir/$test.$result.err.expect $output_dir/$test.$result.err
+        else
+          cp $output_dir/$test.$result.err $output_dir/$test.$result.err.expect
+        fi
+    fi
+  done
+
+
+}
+
+command=$1
+source_dir=$2
+
+if [ $command = "lex" ]
+  then
+    # set output directory, create if it does not exist
+    output_dir=${source_dir}lex
+    mkdir -p ./$output_dir
+
+    # lex all tests in the directory
+    ./Main lex $source_dir
+
+    # run lexer tests
+    run_tests $source_dir $output_dir "toks"
+elif [ $command = "parse" ]
+  then
+    output_dir=${source_dir}parse
+    mkdir -p ./$output_dir
+
+    # parse all tests in the directory
+    ./Main parse $source_dir
+
+    # run parser tests
+    run_tests $source_dir $output_dir "ast"
+else echo "Only \"lex\" or \"parse\" tests are currently available"
+fi
+
+exit 0
