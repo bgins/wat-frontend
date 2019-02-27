@@ -1119,15 +1119,14 @@ showMaybeId maybeId =
 -- IO
 
 
-indentTree :: FilePath -> Int -> Tree -> IO ()
-indentTree path n (Node str children) = do
-    appendFile path $ indent n ++ str ++ "\n"
-    mapM_ (indentTree path (n+1)) children
+indentTree :: Int -> Tree -> [String]
+indentTree n (Node str children) =
+    (indent n ++ str) : concat (map (indentTree (n+1)) children)
 
 
-indentOut :: ToTree a => FilePath -> a -> IO ()
-indentOut path =
-    indentTree path 0 . toTree
+writeTree :: ToTree a => FilePath -> a -> IO ()
+writeTree path =
+    writeFile path . unlines . indentTree 0 . toTree
 
 
 indent :: Int -> String
@@ -1157,6 +1156,7 @@ runTest testDirectory inputFile = do
         path       = testFile $ "parse/" ++ testName
         errPath    = path ++ ".ast.err"
         outPath    = path ++ ".ast.out"
+
 
 
 -- ERRORS
