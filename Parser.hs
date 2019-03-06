@@ -3,8 +3,8 @@
 module Parser where
 
 import Control.Monad (guard)
-import Data.Int (Int32, Int64)
-import Data.Word (Word32)
+-- import Data.Int (Int32, Int64)
+import Data.Word (Word32, Word64)
 import System.Directory (listDirectory)
 import qualified Text.Parsec as Parsec
 import Text.Parsec ((<|>),(<?>))
@@ -52,33 +52,31 @@ data Ident = Ident String deriving (Eq)
 type MaybeIdent = Maybe Ident
 
 
-i32 :: Parser Int32
+i32 :: Parser Word32
 i32 = do
     int <- signedInteger <|> unsignedInteger
     case int of
         UIntLit n -> do
-            -- uninterpreted int
-            guard (n >= (-2147483648) && n <= 4294967295)
-                <?> ": int" ++ show n ++ "out of range. Expected a 32-bit integer"
+            guard (n >= 0 && n <= maxUInt32)
+                <?> "int " ++ show n ++ " out of range. Expected a 32-bit integer."
             return (fromInteger n)
         SIntLit n -> do
-            guard (n >= (-2147483648) && n <= 2147483647)
-                <?> ": int" ++ show n ++ "out of range. Expected a signed 32-bit integer"
+            guard (n >= minSInt32 && n <= maxSInt32)
+                <?> "int " ++ show n ++ " out of range. Expected a signed 32-bit integer."
             return (fromInteger n)
 
 
-i64 :: Parser Int64
+i64 :: Parser Word64
 i64 = do
     int <- signedInteger <|> unsignedInteger
     case int of
         UIntLit n -> do
-            -- uninterpreted int
-            guard (n >= (-9223372036854775808) && n <= 18446744073709551615)
-                <?> ": int" ++ show n ++ "out of range. Expected a 64-bit integer"
+            guard (n >= 0 && n <= maxUInt64)
+                <?> "int " ++ show n ++ " out of range. Expected a 64-bit integer."
             return (fromInteger n)
         SIntLit n -> do
-            guard (n >= (-9223372036854775808) && n <= 9223372036854775807)
-                <?> ": int" ++ show n ++ "out of range. Expected a signed 64-bit integer"
+            guard (n >= minSInt64 && n <= maxSInt64)
+                <?> "int " ++ show n ++ " out of range. Expected a signed 64-bit integer."
             return (fromInteger n)
 
 
@@ -95,8 +93,8 @@ parserIdX = do
     idx <- Parsec.try unsignedInteger <|> identifier
     case idx of
         UIntLit n -> do
-            guard (n >= 0 && n <= 4294967295)
-                <?> ": id" ++ show n ++ "out of range. Ids must be 32-bit unsigned integers"
+            guard (n >= 0 && n <= maxUInt32)
+                <?> "index " ++ show n ++ " out of range. Ids must be 32-bit unsigned integers."
             return (Left $ fromInteger n)
         Id id     ->
             return (Right (Ident id))
@@ -116,6 +114,25 @@ name = do
     case name of
         StringLit str ->
             return (Name str)
+
+
+maxUInt32 :: Integer
+maxUInt32 = 4294967295
+
+minSInt32 :: Integer
+minSInt32 = -2147483648
+
+maxSInt32 :: Integer
+maxSInt32 = 2147483647
+
+maxUInt64 :: Integer
+maxUInt64 = 18446744073709551615
+
+minSInt64 :: Integer
+minSInt64 = -9223372036854775808
+
+maxSInt64 :: Integer
+maxSInt64 = 9223372036854775807
 
 
 
@@ -325,8 +342,8 @@ data Instruction id = Block MaybeIdent ResultType (Instructions id)
                     -- add memory instructions [§6.5.5]
 
                     -- numeric instructions [§6.5.6]
-                    | I32Const Int32
-                    | I64Const Int64
+                    | I32Const Word32
+                    | I64Const Word64
                     | F32Const Float
                     | F64Const Double
 
