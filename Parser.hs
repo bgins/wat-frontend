@@ -1146,6 +1146,11 @@ writeTree path =
     writeFile path . unlines . indentTree 0 . toTree
 
 
+printTree :: ToTree a => a -> IO ()
+printTree =
+    putStr . unlines . indentTree 0 . toTree
+
+
 indent :: Int -> String
 indent n =
     replicate (2*n) ' '
@@ -1167,7 +1172,7 @@ runTest testDirectory inputFile = do
     text <- readFile $ testFile inputFile
     case Parsec.parse parse inputFile text of
         Left err  -> writeFile errPath $ show err
-        Right out ->  indentOut outPath out
+        Right out ->  writeTree outPath out
   where testName   = reverse $ drop 4 $ reverse inputFile
         testFile s = testDirectory ++ s
         path       = testFile $ "parse/" ++ testName
