@@ -3,8 +3,10 @@ import System.Environment
 import Data.List (isSuffixOf)
 import System.Directory (listDirectory, removeFile)
 
+import Check (check)
 import Lexer (testLexer)
 import Parser (testParser)
+
 
 main :: IO ()
 main = do
@@ -32,6 +34,10 @@ main = do
                             testLexer directory
                             testParser directory
                         _           -> putStrLn flagsError
+                "check" ->
+                    case as of
+                        [filepath] -> do
+                            check filepath
                 _        -> putStrLn flagsError
         _   -> putStrLn flagsError
 
