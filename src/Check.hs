@@ -2,10 +2,9 @@ module Check where
 
 import Control.Monad.IO.Class
 import Control.Monad.State
-
 import qualified Text.Parsec as Parsec
 
-import Parser hiding (runTest)
+import Parser
 
 
 

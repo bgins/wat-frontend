@@ -3,13 +3,12 @@
 module Parser where
 
 import Control.Monad (guard)
--- import Data.Int (Int32, Int64)
 import Data.Word (Word32, Word64)
-import System.Directory (listDirectory)
+import System.FilePath.Posix (takeFileName)
 import qualified Text.Parsec as Parsec
 import Text.Parsec ((<|>),(<?>))
 
-import Lexer hiding (runTest)
+import Lexer
 
 
 
@@ -1141,9 +1140,9 @@ indentTree n (Node str children) =
     (indent n ++ str) : concat (map (indentTree (n+1)) children)
 
 
-writeTree :: ToTree a => FilePath -> a -> IO ()
-writeTree path =
-    writeFile path . unlines . indentTree 0 . toTree
+indent :: Int -> String
+indent n =
+    replicate (2*n) ' '
 
 
 printTree :: ToTree a => a -> IO ()
@@ -1151,33 +1150,33 @@ printTree =
     putStr . unlines . indentTree 0 . toTree
 
 
-indent :: Int -> String
-indent n =
-    replicate (2*n) ' '
+writeTree :: ToTree a => FilePath -> a -> IO ()
+writeTree path =
+    writeFile path . unlines . indentTree 0 . toTree
 
 
+printParseOut :: FilePath -> IO ()
+printParseOut target = do
+    text <- readFile target
+    case Parsec.parse parse target text of
+        Left err  -> putStrLn $ show err
+        Right out -> do
+            putStrLn $ "\n• AST for " ++ (takeFileName target) ++ " •"
+            printTree out
 
--- TEST
 
-
-testParser :: String ->  IO ()
-testParser testDirectory = do
-    all <- listDirectory testDirectory
-    tests <- pure $ filter (\f -> f /= "lex" && f /= "parse") all
-    mapM_ (runTest testDirectory) tests
-
-
-runTest :: String -> String -> IO ()
-runTest testDirectory inputFile = do
-    text <- readFile $ testFile inputFile
-    case Parsec.parse parse inputFile text of
+writeParseOut :: FilePath -> FilePath -> IO ()
+writeParseOut target outputDirectory = do
+    clearResult errPath
+    clearResult outPath
+    text <- readFile target
+    case Parsec.parse parse target text of
         Left err  -> writeFile errPath $ show err
-        Right out ->  writeTree outPath out
-  where testName   = reverse $ drop 4 $ reverse inputFile
-        testFile s = testDirectory ++ s
-        path       = testFile $ "parse/" ++ testName
-        errPath    = path ++ ".ast.err"
-        outPath    = path ++ ".ast.out"
+        Right out -> writeTree outPath out
+  where targetName = reverse $ drop 4 $ reverse $ takeFileName target
+        result  = outputDirectory ++ targetName
+        errPath = result ++ ".ast.err"
+        outPath = result ++ ".ast.out"
 
 
 

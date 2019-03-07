@@ -2,11 +2,11 @@ module Lexer where
 
 import Control.Monad (void)
 import Data.Char as Char
-import Data.List (isSuffixOf)
 import Prelude hiding (lex)
 import qualified Text.Parsec as Parsec
 import Text.Parsec ((<|>))
-import System.Directory (listDirectory)
+import System.Directory (doesFileExist, removeFile)
+import System.FilePath.Posix (takeFileName)
 
 import Keywords
 
@@ -330,24 +330,37 @@ inBlockComment = do
 
 
 
--- TEST
+-- IO
 
 
-testLexer :: String -> IO ()
-testLexer testDirectory = do
-    all <- listDirectory testDirectory
-    tests <- pure $ filter (\f -> f /= "lex" && f /= "parse") all
-    mapM_ (runTest testDirectory) tests
+printLexOut :: FilePath -> IO ()
+printLexOut target = do
+    text <- readFile target
+    case Parsec.parse lex target text of
+        Left err  -> putStrLn $ show err
+        Right out -> do
+            putStrLn $ "\n• Token stream for " ++ (takeFileName target) ++ " •"
+            putStrLn $ show out
 
 
-runTest :: String -> String -> IO ()
-runTest testDirectory inputFile = do
-    text <- readFile $ testFile inputFile
-    case Parsec.parse lex inputFile text of
+writeLexOut :: FilePath -> FilePath -> IO ()
+writeLexOut target outputDirectory = do
+    clearResult errPath
+    clearResult outPath
+    text <- readFile target
+    case Parsec.parse lex target text of
         Left err  -> writeFile errPath $ show err
         Right out -> writeFile outPath $ show out
-  where testName   = reverse $ drop 4 $ reverse inputFile
-        testFile s = testDirectory ++ s
-        path       = testFile $ "lex/" ++ testName
-        errPath    = path ++ ".toks.err"
-        outPath    = path ++ ".toks.out"
+  where targetName = reverse $ drop 4 $ reverse $ takeFileName target
+        result  = outputDirectory ++ targetName
+        errPath = result ++ ".toks.err"
+        outPath = result ++ ".toks.out"
+
+
+clearResult :: FilePath -> IO ()
+clearResult file = do
+    fileExists <- doesFileExist file
+    if fileExists then
+        removeFile file
+    else
+        return ()

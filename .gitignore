@@ -1,6 +1,8 @@
-*.hi
-*.o
-
-Main
+# test outputs
 *.err
 *.out
+
+# cabal
+.cabal-sandbox
+cabal.sandbox.config
+dist/
