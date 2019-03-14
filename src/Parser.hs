@@ -63,6 +63,7 @@ i32 = do
             guard (n >= minSInt32 && n <= maxSInt32)
                 <?> "int " ++ show n ++ " out of range. Expected a signed 32-bit integer."
             return (fromInteger n)
+        _         -> Parsec.unexpected "Expected a UIntLit or an SIntLit token"
 
 
 i64 :: Parser Word64
@@ -77,6 +78,7 @@ i64 = do
             guard (n >= minSInt64 && n <= maxSInt64)
                 <?> "int " ++ show n ++ " out of range. Expected a signed 64-bit integer."
             return (fromInteger n)
+        _         -> Parsec.unexpected "Expected a UIntLit or an SIntLit token"
 
 
 maybeIdent :: Parser (Maybe Ident)
@@ -85,6 +87,7 @@ maybeIdent = do
     case id of
         Just (Id id) -> return (Just (Ident id))
         Nothing      -> return Nothing
+        Just _       -> Parsec.unexpected "Expected and Id token"
 
 
 parserIdX :: Parser ParserIdX
@@ -97,6 +100,7 @@ parserIdX = do
             return (Left $ fromInteger n)
         Id id     ->
             return (Right (Ident id))
+        _         -> Parsec.unexpected "Expected a UIntLit or an Id token"
 
 
 moduleName :: Parser ModuleName
@@ -105,6 +109,7 @@ moduleName = do
     case name of
         StringLit str ->
             return (ModuleName str)
+        _         -> Parsec.unexpected "Expected a StringLit token"
 
 
 name :: Parser Name
@@ -113,6 +118,7 @@ name = do
     case name of
         StringLit str ->
             return (Name str)
+        _         -> Parsec.unexpected "Expected a StringLit token"
 
 
 maxUInt32 :: Integer
@@ -298,6 +304,7 @@ importdesc = do
             maybeId <- leftPad $ maybeIdent
             typeuse <- leftPad $ typeUse
             return (FuncImport maybeId typeuse)
+        _         -> Parsec.unexpected "Expected a Keyword token"
 
 
 
@@ -788,7 +795,7 @@ exportdesc = do
         Keyword "func" -> do
             funcidx <- leftPad $ parserIdX
             return (FuncExport funcidx)
-
+        _         -> Parsec.unexpected "Expected a Keyword token"
 
 
 -- MODULE [§6.6.13]
