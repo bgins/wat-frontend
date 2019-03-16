@@ -1,6 +1,6 @@
 (module
-  ;; (func) ;; no typeuse error
-  ;; (func $funcId) ;; no typeuse error
+  (func)
+  (func $funcId)
   (func (type 1))
   (func (type 1) (param i32))
   (func (type 1) (result i32))
