@@ -250,8 +250,8 @@ globalVar = do
 -- TYPE USES [§6.6.3]
 
 
-data TypeUse id = TypeUse id
-                | TypeUseWithDeclarations id Params Results
+data TypeUse idx = TypeUse idx
+                | TypeUseWithDeclarations idx Params Results
                 | InlineType Params Results
 
 typeUse :: Parser (TypeUse ParserIdX)
@@ -285,7 +285,7 @@ data ModuleName = ModuleName String
 
 data Name = Name String
 
-data ImportDescription id = FuncImport MaybeIdent (TypeUse id)
+data ImportDescription idx = FuncImport MaybeIdent (TypeUse idx)
                        -- add table, memory, and global imports here
 
 parseImport :: Parser (Component ParserIdX)
@@ -315,35 +315,35 @@ type Locals = [Local]
 
 data Local = Local MaybeIdent ValType
 
-type Instructions id = [Instruction id]
+type Instructions idx = [Instruction idx]
 
 data Signedness = Signed
                 | Unsigned
 
 
                     -- control instructions [§6.5.2]
-data Instruction id = Block MaybeIdent ResultType (Instructions id)
-                    | Loop MaybeIdent ResultType (Instructions id)
-                    | Conditional MaybeIdent ResultType (Instructions id) (Instructions id)
+data Instruction idx = Block MaybeIdent ResultType (Instructions idx)
+                    | Loop MaybeIdent ResultType (Instructions idx)
+                    | Conditional MaybeIdent ResultType (Instructions idx) (Instructions idx)
                     | Unreachable
                     | Nop
-                    | Br id
-                    | BrIf id
-                    | BrTable [id] id
+                    | Br idx
+                    | BrIf idx
+                    | BrTable [idx] idx
                     | Return
-                    | Call id
-                    | CallIndirect (TypeUse id)
+                    | Call idx
+                    | CallIndirect (TypeUse idx)
 
                     -- parametric instructions [§6.5.3]
                     | Drop
                     | Select
 
                     -- variable instructions [§6.5.4]
-                    | LocalGet id
-                    | LocalSet id
-                    | LocalTee id
-                    | GlobalGet id
-                    | GlobalSet id
+                    | LocalGet idx
+                    | LocalSet idx
+                    | LocalTee idx
+                    | GlobalGet idx
+                    | GlobalSet idx
 
                     -- add memory instructions [§6.5.5]
 
@@ -778,7 +778,7 @@ parseGlobal = do
 -- EXPORTS [§6.6.9]
 
 
-data ExportDescription id = FuncExport id
+data ExportDescription idx = FuncExport idx
                        -- add table, memory, and global exports here
 
 parseExport :: Parser (Component ParserIdX)
@@ -801,16 +801,16 @@ exportdesc = do
 -- MODULE [§6.6.13]
 
 
-data Module id = Module MaybeIdent (Components id)
+data Module idx = Module MaybeIdent (Components idx)
 
-type Components id = [Component id]
+type Components idx = [Component idx]
 
-data Component id = Type MaybeIdent FuncType
-                  | Import ModuleName Name (ImportDescription id)
-                  | Func MaybeIdent (TypeUse id) Locals (Instructions id)
-                  | Start id
-                  | Global MaybeIdent GlobalType (Instructions id)
-                  | Export Name (ExportDescription id)
+data Component idx = Type MaybeIdent FuncType
+                  | Import ModuleName Name (ImportDescription idx)
+                  | Func MaybeIdent (TypeUse idx) Locals (Instructions idx)
+                  | Start idx
+                  | Global MaybeIdent GlobalType (Instructions idx)
+                  | Export Name (ExportDescription idx)
 
 parseModule :: Parser (Module ParserIdX)
 parseModule = do
