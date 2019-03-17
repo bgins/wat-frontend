@@ -10,8 +10,8 @@ import System.FilePath.Posix (takeFileName)
 
 import Keywords
 
-
 type Parser = Parsec.Parsec String ()
+
 
 -- TOKENS
 
@@ -58,8 +58,8 @@ token :: Parser Token
 token = do
     token <- Parsec.choice
         [ keyword
-        , unsignedInteger
-        , signedInteger
+        , Parsec.try unsignedInteger
+        , Parsec.try signedInteger
         , string
         , identifier
         , openParen
@@ -87,6 +87,23 @@ format = do
     return [c]
 
 
+{-| followedByWhitespace is used to disambiguate integers and reserved tokens
+
+When attempting to tokenize with an integer parser, we need to fail on a
+reserved token but allow whitespace (including comments) immediately following
+the integer to succeed. Since reserved tokens are a catch-all, we cannot attempt
+a longest match on them first.
+
+followedByWhitespace enforces whitespace after UIntLit and SIntLit tokens. The
+current version will err on reserved tokens such as [123;] since it only
+checks one semicolon out for line comments.
+-}
+
+followedByWhitespace :: Parser ()
+followedByWhitespace = do
+    Parsec.notFollowedBy $ Parsec.satisfy (\c -> notElem c "(); \n\t\r")
+
+
 -- KEYWORDS
 
 
@@ -103,6 +120,7 @@ keyword = do
 unsignedInteger :: Parser Token
 unsignedInteger = do
     uN <- hexnum <|> num
+    followedByWhitespace
     return (UIntLit uN)
 
 
@@ -115,6 +133,7 @@ positiveInteger :: Parser Token
 positiveInteger = do
     Parsec.char '+'
     sN <- hexnum <|> num
+    followedByWhitespace
     return (SIntLit sN)
 
 
@@ -122,6 +141,7 @@ negativeInteger :: Parser Token
 negativeInteger = do
     Parsec.char '-'
     sN <- hexnum <|> num
+    followedByWhitespace
     return (SIntLit (- sN))
 
 
@@ -192,7 +212,7 @@ escapeSequence = do
 
 escapeCharacter :: Parser String
 escapeCharacter = do
-    c <- Parsec.oneOf "tnr\"`\\"
+    c <- Parsec.oneOf "tnr\"'\\"
     return [c]
 
 
@@ -200,7 +220,6 @@ rawByte :: Parser String
 rawByte = do
     n <- Parsec.hexDigit
     m <- Parsec.hexDigit
-    Parsec.lookAhead (Parsec.oneOf "\" ")
     return [n, m]
 
 
@@ -209,7 +228,6 @@ unicodeCharacter = do
     hds <- Parsec.between (Parsec.string "u{") (Parsec.string "}") (digits Parsec.hexDigit)
     cs <- unicodeHexString hds
     return ("u{" ++ cs ++ "}")
-
 
 
 unicodeHexString :: [Integer] -> Parser String
@@ -248,6 +266,7 @@ idChar =
         ]
 
 
+
 -- PARENS
 
 
@@ -284,7 +303,7 @@ comment = do
 
 lineComment :: Parser String
 lineComment = do
-    Parsec.string ";; "
+    Parsec.string ";;"
     lc <- Parsec.manyTill Parsec.anyChar eol
     return lc
 
