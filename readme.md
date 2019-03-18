@@ -72,3 +72,13 @@ The script will lex, parse, or check all tests in a single directory.
 This command will parse all tests in `tests/programs/` and output the results to
 `tests/programs/parse/`. The output directory name will match the name of the
 phase run over the tests.
+
+## Validation
+
+`LexSpec.hs` is a token fuzzing suite that can be run with:
+```
+cabal test validation
+```
+The test generates arbitrary tokens, untokenizes them to a space-separated
+string, lexes the string, and checks that the resulting tokens are the same as
+the original tokens.
