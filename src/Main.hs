@@ -21,10 +21,13 @@ args :: Parser Args
 args = Args
       <$> argument str
           (metavar "PHASE"
-         <> help "lex, parse, or check" )
+         -- <> help "lex, parse, or check" )
+         <> help "lex [produce a token stream], \
+                 \parse [produce an AST directly from source], \
+                 \check [*experimental* perform semantic analysis on an AST]" )
       <*> argument str
           (metavar "TARGET"
-         <> help "Target .wat or .tok file" )
+         <> help "A target .wat or .tok file" )
       <*> ( optional $ strOption
           $ long "out"
          <> short 'o'
@@ -41,7 +44,7 @@ main = run =<< execParser opts
   where
     opts = info (args <**> helper)
       ( fullDesc
-     <> progDesc "Lexes, parses, and typechecks WebAssembly text or tokens"
+     <> progDesc "Lexes and parses WebAssembly text or tokens"
      <> header "wat-frontend - a compiler frontend for WebAssembly text" )
 
 
