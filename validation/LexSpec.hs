@@ -13,7 +13,7 @@ import Lexer
 
 spec =
   modifyMaxSuccess (const 10000) $
-    describe "tokenize" $
+    describe "tokens" $
       prop "preserves tokens that have be encoded as a string" $ \ts ->
         parse tokens "" (untokenize ts) === Right ts
 

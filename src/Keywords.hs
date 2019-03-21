@@ -2,6 +2,17 @@ module Keywords ( keywords ) where
 
 import Data.List
 
+{-| Collect keywords into a list of strings where the longest keywords appear
+  first.
+
+  This arrangement is to allow match on longest keywords first, which is not
+  particularly efficient. Sorting can be dropped when the lexer is changes its
+  matching strategy.
+
+  This is an implementation of the WebAssembly spec released on January 10th,
+  2019. Sections of the specification are referenced with § section marks
+  throughout this module.
+-}
 
 keywords :: [String]
 keywords =
@@ -26,7 +37,7 @@ types =
         ]
 
 
--- Section 6.4.1
+-- [§6.4.1]
 values :: [String]
 values =
     [ "i32"
@@ -36,7 +47,7 @@ values =
     ]
 
 
--- Section 6.4.3
+-- [§6.4.3]
 functions :: [String]
 functions =
     [ "func"
@@ -45,13 +56,13 @@ functions =
     ]
 
 
--- Section 6.4.6
+-- [§6.4.6]
 tables :: [String]
 tables =
     [ "funcref" ]
 
 
--- Section 6.4.7
+-- [§6.4.7]
 globals :: [String]
 globals =
     [ "mut" ]
@@ -73,7 +84,7 @@ instructions =
         ]
 
 
--- Section 6.5.2
+-- [§6.5.2]
 control :: [String]
 control =
     [ "block"
@@ -92,7 +103,7 @@ control =
     ]
 
 
--- Section 6.5.3
+-- [§6.5.3]
 parametric :: [String]
 parametric =
     [ "drop"
@@ -100,7 +111,7 @@ parametric =
     ]
 
 
--- Section 6.5.4
+-- [§6.5.4]
 variable :: [String]
 variable =
     [ "local.get"
@@ -111,13 +122,13 @@ variable =
     ]
 
 
--- Section 6.5.5
--- TODO: the offset and align keywords include the number after the '='
+-- [§6.5.5]
 memory :: [String]
 memory =
-    [ "offset="
-    , "align="
-    , "i32.load"
+    [
+    -- "offset="
+    -- "align="
+    "i32.load"
     , "i64.load"
     , "f32.load"
     , "f64.load"
@@ -145,7 +156,7 @@ memory =
     ]
 
 
--- Section 6.5.6
+-- [§6.5.6]
 numeric :: [String]
 numeric =
     [ "i32.const"
@@ -278,7 +289,7 @@ numeric =
     ]
 
 
--- Section 6.5.7
+-- [§6.5.7]
 folded :: [String]
 folded =
     [ "then" ]
@@ -288,7 +299,7 @@ folded =
 -- MODULES
 
 
--- Section 6.6
+-- [§6.6]
 modules :: [String]
 modules =
     [ "type"

@@ -10,10 +10,19 @@ import System.FilePath.Posix (takeFileName)
 
 import Keywords
 
+{-| This module contains parser primitives that can be used to generate a token
+  stream or in a parser that generates an AST. The lex function does the former
+  and Parser.hs does the latter.
+
+  This is an implementation of the WebAssembly spec released on January 10th,
+  2019. Sections of the specification are referenced with § section marks
+  throughout this module.
+-}
+
 type Parser = Parsec.Parsec String ()
 
 
--- TOKENS
+-- TOKENS [§6.2.2]
 
 
 data Token = Keyword String
@@ -24,17 +33,6 @@ data Token = Keyword String
            | OpenParen
            | CloseParen
            | Reserved String deriving (Eq)
-
-
-instance Show Token where
-    show (Keyword kw) = kw
-    show (UIntLit n) = show n
-    show (SIntLit n) = show n
-    show (StringLit str) = show str
-    show (Id ident) = ident
-    show OpenParen = show '('
-    show CloseParen = show ')'
-    show (Reserved r) = r
 
 
 
@@ -69,42 +67,8 @@ token = do
     return token
 
 
-whitespace :: Parser ()
-whitespace = do
-    Parsec.many $ space <|> format <|> Parsec.try comment
-    return ()
-
-
-space :: Parser String
-space = do
-    c <- Parsec.char ' '
-    return [c]
-
-
-format :: Parser String
-format = do
-    c <- Parsec.oneOf "\t\n\r"
-    return [c]
-
-
-{-| followedByWhitespace is used to disambiguate integers and reserved tokens
-
-When attempting to tokenize with an integer parser, we need to fail on a
-reserved token but allow whitespace (including comments) immediately following
-the integer to succeed. Since reserved tokens are a catch-all, we cannot attempt
-a longest match on them first.
-
-followedByWhitespace enforces whitespace after UIntLit and SIntLit tokens. The
-current version will err on reserved tokens such as [123;] since it only
-checks one semicolon out for line comments.
--}
-
-followedByWhitespace :: Parser ()
-followedByWhitespace = do
-    Parsec.notFollowedBy $ Parsec.satisfy (\c -> notElem c "(); \n\t\r")
-
-
--- KEYWORDS
+  
+-- KEYWORDS [see Keywords.hs for section references]
 
 
 keyword :: Parser Token
@@ -114,7 +78,7 @@ keyword = do
 
 
 
--- INTEGER LITERALS
+-- INTEGER LITERALS [§6.3.1]
 
 
 unsignedInteger :: Parser Token
@@ -178,7 +142,7 @@ fromDigits base ds =
 
 
 
--- STRING LITERALS
+-- STRING LITERALS [§6.3.3]
 
 
 string :: Parser Token
@@ -245,7 +209,7 @@ betweenQuotes =
 
 
 
--- IDENTIFIERS
+-- IDENTIFIERS [§6.3.5]
 
 
 identifier :: Parser Token
@@ -267,7 +231,7 @@ idChar =
 
 
 
--- PARENS
+-- PARENS [§6.2.2]
 
 
 openParen :: Parser Token
@@ -283,7 +247,7 @@ closeParen = do
 
 
 
--- RESERVED
+-- RESERVED [§6.2.2]
 
 
 reserved :: Parser Token
@@ -293,7 +257,46 @@ reserved = do
 
 
 
--- COMMENTS
+-- WHITESPACE [§6.2.3]
+
+  
+whitespace :: Parser ()
+whitespace = do
+    Parsec.many $ space <|> format <|> Parsec.try comment
+    return ()
+
+
+space :: Parser String
+space = do
+    c <- Parsec.char ' '
+    return [c]
+
+
+format :: Parser String
+format = do
+    c <- Parsec.oneOf "\t\n\r"
+    return [c]
+
+
+{-| followedByWhitespace is used to disambiguate integers and reserved tokens
+
+  When attempting to tokenize with an integer parser, we need to fail on a
+  reserved token but allow whitespace (including comments) immediately following
+  the integer to succeed. Since reserved tokens are a catch-all, we cannot attempt
+  a longest match on them first.
+
+  followedByWhitespace enforces whitespace after UIntLit and SIntLit tokens. The
+  current version will err on reserved tokens such as [123;] since it only
+  checks one semicolon out for line comments.
+-}
+
+followedByWhitespace :: Parser ()
+followedByWhitespace = do
+    Parsec.notFollowedBy $ Parsec.satisfy (\c -> notElem c "(); \n\t\r")
+
+
+
+-- COMMENTS [§6.2.4]
 
 
 comment :: Parser String
@@ -348,6 +351,21 @@ inBlockComment = do
     Parsec.between (Parsec.string "(;") (Parsec.string ";)")
 
 
+  
+-- SHOW
+
+  
+instance Show Token where
+    show (Keyword kw) = kw
+    show (UIntLit n) = show n
+    show (SIntLit n) = show n
+    show (StringLit str) = show str
+    show (Id ident) = ident
+    show OpenParen = show '('
+    show CloseParen = show ')'
+    show (Reserved r) = r
+
+
 
 -- IO
 
@@ -358,7 +376,7 @@ printLexOut target = do
     case Parsec.parse lex target text of
         Left err  -> putStrLn $ show err
         Right out -> do
-            putStrLn $ "\n• Token stream for " ++ (takeFileName target) ++ " •"
+            putStrLn $ "• Token stream for " ++ (takeFileName target) ++ " •"
             putStrLn $ show out
 
 

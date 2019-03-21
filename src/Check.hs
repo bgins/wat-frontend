@@ -6,6 +6,17 @@ import qualified Text.Parsec as Parsec
 
 import Parser
 
+{-| This module implements semantic analysis to validate WebAssembly modules.
+
+  The module takes ASTs produced by Parser.hs as input.
+
+  Work has only begun on this module and much remains!
+
+  This is an implementation of the WebAssembly spec released on January 10th,
+  2019. Sections of the specification are referenced with § section marks
+  throughout this module.
+-}
+
 
 
 -- CONTEXTS
@@ -99,15 +110,8 @@ uniqueIdentifier id indexSpace =
     null [ j | (Just j, _) <- indexSpace, j == id ]
 
 
+
 -- SHOW
-
-
-printStep :: Context -> Component ParserIdX -> IO ()
-printStep context component = do
-    putStr $ show context
-    putStrLn "-----"
-    printTree component
-    putStrLn ""
 
 
 instance Show Context where
@@ -116,30 +120,9 @@ instance Show Context where
         ++ indent 1 ++ "funcs\n" ++ (concat $ map showType funcs)
         ++ indent 1 ++ "globals\n" ++ (concat $ map showType globals)
 
-
-showType :: Show a => (MaybeIdent, a) -> String
-showType (maybeId, typedef) =
-    indent 3
-        ++ case maybeId of
-               Just id -> show id ++ " :" ++ show typedef ++ "\n"
-               Nothing -> "_ :" ++ show typedef ++ "\n"
-
-
 instance Show FuncType where
     show (FuncType params results) =
         concat $ (map (\p -> p ++ " ->") $ showParams params) ++ showResults results
-
-showParams :: [Param] -> [String]
-showParams params =
-    case params of
-        p:ps -> map show (p:ps)
-        _    -> [" ()"]
-
-showResults :: [Result] -> [String]
-showResults results =
-    case results of
-        r:rs -> map show (r:rs)
-        _    -> [" ()"]
 
 instance Show Param where
     show (Param maybeId valtype) =
@@ -154,3 +137,33 @@ instance Show GlobalType where
         " mut" ++ show valtype
     show (GlobalConst valtype) =
         " const" ++ show valtype
+
+
+showType :: Show a => (MaybeIdent, a) -> String
+showType (maybeId, typedef) =
+    indent 3
+        ++ case maybeId of
+               Just id -> show id ++ " :" ++ show typedef ++ "\n"
+               Nothing -> "_ :" ++ show typedef ++ "\n"
+
+
+showParams :: [Param] -> [String]
+showParams params =
+    case params of
+        p:ps -> map show (p:ps)
+        _    -> [" ()"]
+
+
+showResults :: [Result] -> [String]
+showResults results =
+    case results of
+        r:rs -> map show (r:rs)
+        _    -> [" ()"]
+
+
+printStep :: Context -> Component ParserIdX -> IO ()
+printStep context component = do
+    putStr $ show context
+    putStrLn "-----"
+    printTree component
+    putStrLn ""

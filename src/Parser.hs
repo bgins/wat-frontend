@@ -10,6 +10,19 @@ import Text.Parsec ((<|>),(<?>))
 
 import Lexer
 
+{-| This module contains a parser that generates ASTs from WebAssembly text source.
+
+  Lexical analysis and parsing a performed in a single pass in parser combinator
+  style. The parser depends on the parsers from Lexer.hs as primitives.
+
+  This is an implementation of the WebAssembly spec released on January 10th,
+  2019. Sections of the specification are referenced with § section marks
+  throughout this module.
+
+  Tables, Memories, Element Segments and Data Segments have not been
+  implemented. In addition, Floating-point numbers have not been implemented.
+-}
+
 
 
 -- PARSE
@@ -249,6 +262,9 @@ globalVar = do
 
 -- TYPE USES [§6.6.3]
 
+{-| InlineType implements the typeuse abbreviation that does not reference a
+  pre-existing type
+-}
 
 data TypeUse idx = TypeUse idx
                 | TypeUseWithDeclarations idx Params Results
@@ -495,7 +511,6 @@ local = do
         _              -> failStartsWith "local" "local" kw
 
 
--- instructions [§6.5]
 instructions :: Parser (Instructions ParserIdX)
 instructions =
     Parsec.sepEndBy instruction whitespace
@@ -1154,7 +1169,7 @@ indent n =
 
 printTree :: ToTree a => a -> IO ()
 printTree =
-    putStr . unlines . indentTree 0 . toTree
+    putStr . unlines . indentTree 1 . toTree
 
 
 writeTree :: ToTree a => FilePath -> a -> IO ()
@@ -1168,7 +1183,7 @@ printParseOut target = do
     case Parsec.parse parse target text of
         Left err  -> putStrLn $ show err
         Right out -> do
-            putStrLn $ "\n• AST for " ++ (takeFileName target) ++ " •"
+            putStrLn $ "• AST for " ++ (takeFileName target) ++ " •"
             printTree out
 
 
