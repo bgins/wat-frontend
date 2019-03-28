@@ -68,7 +68,7 @@ arbitraryStringChars = do
 
 arbitraryChar :: Gen String
 arbitraryChar = do
-    c <- QuickCheck.suchThat arbitraryUnicodeChar 
+    c <- QuickCheck.suchThat QuickCheck.arbitraryUnicodeChar 
              (\d -> d /= '\\' && d /= '\"' && not (isControl d))
     return [c]
 
@@ -90,7 +90,7 @@ arbitraryEscapeChar = do
 
 arbitraryUnicodeEncoding :: Gen String
 arbitraryUnicodeEncoding = do
-    c <- arbitraryUnicodeChar
+    c <- QuickCheck.arbitraryUnicodeChar
     return ("u{" ++ showHex (ord c) "" ++ "}")
     
 

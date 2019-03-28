@@ -15,7 +15,7 @@ cabal sandbox init
 
 Install the project dependencies into the sandbox:
 ```
-cabal install --only-dependencies
+cabal install --only-dependencies --enable-tests
 ```
 
 ## Build

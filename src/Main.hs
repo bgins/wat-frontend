@@ -21,7 +21,6 @@ args :: Parser Args
 args = Args
       <$> argument str
           (metavar "PHASE"
-         -- <> help "lex, parse, or check" )
          <> help "lex [produce a token stream], \
                  \parse [produce an AST directly from source], \
                  \check [*experimental* perform semantic analysis on an AST]" )

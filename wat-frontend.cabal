@@ -14,7 +14,7 @@ cabal-version:       >=1.10
 executable wat-frontend
   main-is:             Main.hs
   other-extensions:    FlexibleInstances
-  build-depends:       base >=4.9 && <4.10, directory >=1.3 && <1.4, filepath >=1.4.1.1, mtl >= 2.2.1, optparse-applicative >= 0.14.3.0, parsec >=3.1 && <3.2
+  build-depends:       base >=4.9 && <4.10, directory >=1.3 && <1.4, filepath >=1.4.1.1 && <1.5, mtl >=2.2.1 && <2.3, optparse-applicative >=0.14.3.0 && <0.15, parsec >=3.1 && <3.2
   hs-source-dirs:      src
   default-language:    Haskell2010
   ghc-options:         -fwarn-incomplete-patterns
@@ -23,11 +23,11 @@ library
   exposed-modules:    Check Keywords Lexer Parser
   hs-source-dirs:     src
   default-language:   Haskell2010
-  build-depends:       base >=4.9 && <4.10, directory >=1.3 && <1.4, filepath >=1.4.1.1, mtl >= 2.2.1, optparse-applicative >= 0.14.3.0, parsec >=3.1 && <3.2
+  build-depends:       base >=4.9 && <4.10, directory >=1.3 && <1.4, filepath >=1.4.1.1, mtl >=2.2.1, optparse-applicative >=0.14.3.0, parsec >=3.1 && <3.2
 
 test-suite validation
   main-is:            Spec.hs
   hs-source-dirs:     validation
   default-language:   Haskell2010
   type:               exitcode-stdio-1.0
-  build-depends:      base >= 4.7 && < 5, generic-random, hspec, hspec-discover, mtl >= 2.2.1, optparse-applicative >= 0.14.3.0, parsec >=3.1 && <3.2, QuickCheck, wat-frontend >= 0.1.0.0
+  build-depends:      base >=4.7 && <5, hspec >=2.7.0, hspec-discover >=2.7.0 , mtl >=2.2.1, optparse-applicative >=0.14.3.0, parsec >=3.1 && <3.2, QuickCheck >=2.12.6.1, wat-frontend >=0.1.0.0
