@@ -2,6 +2,7 @@ module Check where
 
 import Control.Monad.IO.Class
 import Control.Monad.State
+import Data.Word (Word32)
 import qualified Text.Parsec as Parsec
 
 import Parser
@@ -37,6 +38,9 @@ data LocalContext = LocalContext
     }
 
 
+type Types = [(MaybeIdent, FuncType)]
+
+
 
 -- CHECK
 
@@ -51,17 +55,26 @@ check filepath = do
                 Module maybeId components -> do
                     context <- execStateT (makeContext components) emptyContext
                     putStr $ show context
+                    checks <- checkModule context components
+                    if and checks then
+                      putStrLn "Module is valid."
+                    else
+                      putStrLn "Invalid module."
                     return ()
                   where emptyContext = Context { types = [], funcs = [], globals = [] }
 
 
+
+-- CONTEXT PREPASS
+
+  
 makeContext :: Components ParserIdX -> StateT Context IO ()
 makeContext components = do
-    mapM_ addComponent components
+    mapM_ registerComponent components
 
-
-addComponent :: Component ParserIdX -> StateT Context IO ()
-addComponent component = do
+  
+registerComponent :: Component ParserIdX -> StateT Context IO ()
+registerComponent component = do
     context <- get
     liftIO $ printStep context component
     case component of
@@ -111,14 +124,174 @@ uniqueIdentifier id indexSpace =
 
 
 
+-- CHECK
+
+
+checkModule :: Context -> Components ParserIdX -> IO [Bool]
+checkModule context components =
+    mapM (checkComponent context) components
+
+
+checkComponent :: Context -> Component ParserIdX -> IO Bool
+checkComponent context component = do
+    case component of
+        Type _ _ -> return True
+        Import moduleName name importdesc -> do
+          checkImport context importdesc
+        Func maybeId typeuse locals instructions -> return True
+        -- check Start after all Funcs have been added to see if idx is a valid function
+        Start _ -> return True
+        Global maybeId globaltype instructions -> return True
+        Export name exportdesc -> return True
+
+
+
+-- IMPORTS
+
+
+checkImport :: Context -> ImportDescription ParserIdX -> IO Bool
+checkImport context importdesc = do
+    case importdesc of
+        FuncImport maybeId typeuse -> do
+            case typeuse of
+                TypeUse idx ->
+                    checkTypeUse idx context
+                TypeUseWithDeclarations idx params results ->
+                    checkTypeUseWithDeclarations idx params results context
+                InlineType params results ->
+                    return True  -- type defined locally, should be valid
+
+
+
+-- TYPEUSE
+
+  
+checkTypeUse :: ParserIdX -> Context -> IO Bool
+checkTypeUse idx context =
+    case lookupType idx (types context) of
+        Just _ -> return True
+        Nothing -> do
+          putStrLn $ showMissingType idx
+          return False 
+
+  
+checkTypeUseWithDeclarations :: ParserIdX -> Params -> Results -> Context -> IO Bool
+checkTypeUseWithDeclarations idx params results context =
+    case lookupType idx (types context) of
+        Just functype -> do
+            case functype of
+                FuncType contextParams contextResults -> do
+                    paramChecks <- checkParams contextParams params
+                    resultChecks <- checkResults contextResults results
+                    if (and paramChecks) && (and resultChecks) then
+                        return True
+                    else do
+                        putStrLn $ showTypeMismatch idx
+                        return False
+        Nothing -> do
+            putStrLn $ showMissingType idx
+            return False 
+ 
+
+
+-- PARAMS AND RESULTS
+ 
+
+checkParams :: Params -> Params -> IO [Bool]
+checkParams contextParams referenceParams = do
+    mapM checkParam $ zip contextParams referenceParams
+
+
+checkParam :: (Param, Param) -> IO Bool
+checkParam (contextParam, referenceParam) = do
+    case referenceParam of
+        Param _ referenceValtype ->
+            case contextParam of
+                Param _ contextValtype ->
+                    if (referenceValtype == contextValtype) then
+                        return True
+                    else
+                        return False
+  
+checkResults :: Results -> Results -> IO [Bool]
+checkResults contextResults referenceResults = do
+    mapM checkResult $ zip contextResults referenceResults
+
+
+checkResult :: (Result, Result) -> IO Bool
+checkResult (contextResult, referenceResult) = do
+    case referenceResult of
+        Result referenceValtype ->
+            case contextResult of
+                Result contextValtype ->
+                    if (referenceValtype == contextValtype) then
+                        return True
+                    else
+                        return False
+ 
+
+-- checkParamsResults :: a -> a -> IO [Bool]
+-- checkParamsResults types references = do
+--     mapM checkParamResult $ zip types references
+
+
+-- checkParamResult :: (a, a) -> IO Bool
+-- checkParamResult (type_, reference) = do
+--     case reference of
+--         Param _ referenceValtype ->
+--             case type_ of
+--                 Param _ valtype ->
+--                     if (referenceValtype == valtype) then
+--                         return True
+--                     else
+--                         return False
+--         Result referenceValtype ->
+--             case type_ of
+--                 Result valtype ->
+--                     if (referenceValtype == valtype) then
+--                         return True
+--                     else
+--                         return False
+ 
+
+
+-- LOOKUP
+
+  
+lookupType :: ParserIdX -> Types -> Maybe FuncType
+lookupType idx types =
+    case idx of
+        Left n   -> lookupByIndex n types
+        Right id -> lookupById id types
+
+
+lookupByIndex :: Word32 -> [(MaybeIdent, a)] -> Maybe a
+lookupByIndex n ts =
+    case ts of
+        t:ts ->
+            case n of
+                0 -> Just $ snd t
+                _ -> lookupByIndex (n-1) ts
+        []   ->
+            Nothing
+
+
+lookupById :: Ident -> [(MaybeIdent, a)] -> Maybe a
+lookupById id ts =
+    case filter (\t -> fst t == Just id) ts of
+        t:ts -> Just $ snd t
+        []   -> Nothing
+           
+
 -- SHOW
 
 
 instance Show Context where
-    show (Context types funcs globals) = "context" ++ "\n"
+    show (Context types funcs globals) = "• context •" ++ "\n"
         ++ indent 1 ++ "types\n" ++ (concat $ map showType types)
         ++ indent 1 ++ "funcs\n" ++ (concat $ map showType funcs)
         ++ indent 1 ++ "globals\n" ++ (concat $ map showType globals)
+        ++ "\n"
 
 instance Show FuncType where
     show (FuncType params results) =
@@ -167,3 +340,17 @@ printStep context component = do
     putStrLn "-----"
     printTree component
     putStrLn ""
+
+
+
+-- SHOW ERRORS
+
+
+showMissingType :: ParserIdX -> String
+showMissingType idx =
+    "An import failed during typechecking. The type" ++ (showIdX idx) ++ " does not exist."
+
+
+showTypeMismatch :: ParserIdX -> String
+showTypeMismatch idx =
+    "An import failed during typechecking. The inline declarations do not match the reference type" ++ (showIdX idx)
