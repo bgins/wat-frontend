@@ -1,7 +1,8 @@
 (module
   (import "env" "print" (func $print (param i32)))
-  ;; (import "env" "printLn" (func $printLn (param i32)))  ;; fails, but should not
+  (import "env" "printLn" (func $printLn (param i32)))
   (global i32 i32.const 1)
+  ;; (import "env" "log" (func $log (param i32)))  ;; fails
   (type (func (param i32) (result i32)))
   (func $main
     i32.const 21

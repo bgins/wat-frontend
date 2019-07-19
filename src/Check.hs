@@ -23,11 +23,19 @@ import Parser
 -- CONTEXTS
 
 
+-- data Context = Context
+--     { types :: [(MaybeIdent, FuncType)]
+--     , funcs :: [(MaybeIdent, FuncType)]
+--     -- add tables and mems
+--     , globals :: [(MaybeIdent, GlobalType)]
+--     }
+
 data Context = Context
     { types :: [(MaybeIdent, FuncType)]
     , funcs :: [(MaybeIdent, FuncType)]
     -- add tables and mems
     , globals :: [(MaybeIdent, GlobalType)]
+    , imports :: [ImportDescription ParserIdX]
     }
 
 
@@ -61,16 +69,54 @@ check filepath = do
                     else
                       putStrLn "Invalid module."
                     return ()
-                  where emptyContext = Context { types = [], funcs = [], globals = [] }
+                  where emptyContext = Context { types = [], funcs = [], globals = [], imports = [] }
 
 
 
 -- CONTEXT PREPASS
 
   
+-- makeContext :: Components ParserIdX -> StateT Context IO ()
+-- makeContext components = do
+--     mapM_ registerComponent components
+
+-- registerComponent :: Component ParserIdX -> StateT Context IO ()
+-- registerComponent component = do
+--     context <- get
+--     liftIO $ printStep context component
+--     case component of
+--         Type maybeId functype -> do
+--             updatedTypes <- addId "type" maybeId functype (types context)
+--             put (context { types = updatedTypes })
+--         Import _ _ importdesc ->
+--             if null (funcs context) && null (globals context) then
+--                 case importdesc of
+--                     FuncImport maybeId typeuse ->
+--                         case typeuse of
+--                             InlineType params results -> do
+--                                 updatedFuncs <- addId "func" maybeId (FuncType params results) (funcs context)
+--                                 put (context { funcs = updatedFuncs })
+--                             _ -> return () -- validate these cases in next pass
+--             else
+--                 fail "Imports must come before any funcs, tables, memories, or globals in a valid module."
+--         Func maybeId typeuse _ _ ->
+--             case typeuse of
+--                 InlineType params results -> do
+--                     updatedFuncs <- addId "func" maybeId (FuncType params results) (funcs context)
+--                     put (context { funcs = updatedFuncs })
+--                 _ -> return () -- validate these cases in next pass
+--         Start _ -> return ()
+--         Global maybeId globaltype _ -> do
+--             updatedGlobals <- addId "func" maybeId globaltype (globals context)
+--             put (context { globals = updatedGlobals })
+--         Export _ _ -> return ()
+
+
 makeContext :: Components ParserIdX -> StateT Context IO ()
 makeContext components = do
     mapM_ registerComponent components
+    context <- get
+    mapM_ registerImport (imports context)
 
   
 registerComponent :: Component ParserIdX -> StateT Context IO ()
@@ -82,14 +128,9 @@ registerComponent component = do
             updatedTypes <- addId "type" maybeId functype (types context)
             put (context { types = updatedTypes })
         Import _ _ importdesc ->
-            if null (funcs context) && null (globals context) then
-                case importdesc of
-                    FuncImport maybeId typeuse ->
-                        case typeuse of
-                            InlineType params results -> do
-                                updatedFuncs <- addId "func" maybeId (FuncType params results) (funcs context)
-                                put (context { funcs = updatedFuncs })
-                            _ -> return () -- validate these cases in next pass
+            if null (funcs context) && null (globals context) then do
+                updatedImports <- addImport importdesc (imports context)
+                put (context { imports = updatedImports })
             else
                 fail "Imports must come before any funcs, tables, memories, or globals in a valid module."
         Func maybeId typeuse _ _ ->
@@ -105,6 +146,19 @@ registerComponent component = do
         Export _ _ -> return ()
 
 
+registerImport :: ImportDescription ParserIdX -> StateT Context IO ()
+registerImport importdesc = do
+    context <- get
+    -- liftIO $ printStep context component
+    case importdesc of
+        FuncImport maybeId typeuse ->
+            case typeuse of
+                InlineType params results -> do
+                    updatedFuncs <- prependId "func" maybeId (FuncType params results) (funcs context)
+                    put (context { funcs = updatedFuncs })
+                _ -> return () -- validate these cases in next pass
+
+
 addId :: String -> MaybeIdent -> a -> [(MaybeIdent, a)] -> StateT Context IO [(MaybeIdent, a)]
 addId indexSpaceName maybeId typedef indexSpace = do
     case maybeId of
@@ -117,6 +171,25 @@ addId indexSpaceName maybeId typedef indexSpace = do
                 return indexSpace
         Nothing -> return (indexSpace ++ [(Nothing, typedef)])
 
+
+prependId :: String -> MaybeIdent -> a -> [(MaybeIdent, a)] -> StateT Context IO [(MaybeIdent, a)]
+prependId indexSpaceName maybeId typedef indexSpace = do
+    case maybeId of
+        Just id ->
+            if uniqueIdentifier id indexSpace then
+                return ((maybeId, typedef) : indexSpace)
+            else do
+                liftIO $ putStrLn $ "Id " ++ show id
+                    ++ " already defined in " ++ indexSpaceName ++ " index space."
+                return indexSpace
+        Nothing -> return (indexSpace ++ [(Nothing, typedef)])
+
+
+
+
+addImport :: ImportDescription ParserIdX -> [ImportDescription ParserIdX] -> StateT Context IO [ImportDescription ParserIdX]
+addImport importdesc imports =
+    return (importdesc : imports)
 
 uniqueIdentifier :: Ident -> [(MaybeIdent,a)] -> Bool
 uniqueIdentifier id indexSpace =
@@ -181,8 +254,9 @@ checkTypeUseWithDeclarations idx params results context =
         Just functype -> do
             case functype of
                 FuncType contextParams contextResults -> do
-                    paramChecks <- checkParams contextParams params
-                    resultChecks <- checkResults contextResults results
+                    -- paramChecks <- checkParams contextParams params
+                    paramChecks <- return $ checkParams contextParams params
+                    resultChecks <- return $ checkResults contextResults results
                     if (and paramChecks) && (and resultChecks) then
                         return True
                     else do
@@ -195,64 +269,26 @@ checkTypeUseWithDeclarations idx params results context =
 
 
 -- PARAMS AND RESULTS
- 
-
-checkParams :: Params -> Params -> IO [Bool]
-checkParams contextParams referenceParams = do
-    mapM checkParam $ zip contextParams referenceParams
 
 
-checkParam :: (Param, Param) -> IO Bool
-checkParam (contextParam, referenceParam) = do
-    case referenceParam of
-        Param _ referenceValtype ->
-            case contextParam of
-                Param _ contextValtype ->
-                    if (referenceValtype == contextValtype) then
-                        return True
-                    else
-                        return False
-  
-checkResults :: Results -> Results -> IO [Bool]
-checkResults contextResults referenceResults = do
-    mapM checkResult $ zip contextResults referenceResults
+checkParams :: Params -> Params -> [Bool]
+checkParams contextParams referenceParams =
+    map checkParam $ zip contextParams referenceParams
 
 
-checkResult :: (Result, Result) -> IO Bool
-checkResult (contextResult, referenceResult) = do
-    case referenceResult of
-        Result referenceValtype ->
-            case contextResult of
-                Result contextValtype ->
-                    if (referenceValtype == contextValtype) then
-                        return True
-                    else
-                        return False
- 
+checkParam :: (Param, Param) -> Bool
+checkParam (Param _ contextValtype, Param _ referenceValtype) =
+    contextValtype == referenceValtype
 
--- checkParamsResults :: a -> a -> IO [Bool]
--- checkParamsResults types references = do
---     mapM checkParamResult $ zip types references
+checkResults :: Results -> Results -> [Bool]
+checkResults contextResults referenceResults =
+    map checkResult $ zip contextResults referenceResults
 
 
--- checkParamResult :: (a, a) -> IO Bool
--- checkParamResult (type_, reference) = do
---     case reference of
---         Param _ referenceValtype ->
---             case type_ of
---                 Param _ valtype ->
---                     if (referenceValtype == valtype) then
---                         return True
---                     else
---                         return False
---         Result referenceValtype ->
---             case type_ of
---                 Result valtype ->
---                     if (referenceValtype == valtype) then
---                         return True
---                     else
---                         return False
- 
+checkResult :: (Result, Result) -> Bool
+checkResult (Result contextValtype, Result referenceValtype) =
+    contextValtype == referenceValtype
+
 
 
 -- LOOKUP
@@ -287,10 +323,11 @@ lookupById id ts =
 
 
 instance Show Context where
-    show (Context types funcs globals) = "• context •" ++ "\n"
+    show (Context types funcs globals imports) = "• context •" ++ "\n"
         ++ indent 1 ++ "types\n" ++ (concat $ map showType types)
         ++ indent 1 ++ "funcs\n" ++ (concat $ map showType funcs)
         ++ indent 1 ++ "globals\n" ++ (concat $ map showType globals)
+        -- ++ indent 1 ++ "imports\n" ++ (concat $ map showType imports)
         ++ "\n"
 
 instance Show FuncType where
