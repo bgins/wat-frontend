@@ -6,7 +6,7 @@ import Data.Maybe (listToMaybe)
 import Data.Word (Word32)
 import qualified Text.Parsec as Parsec
 
-import Parser
+import Parser hiding (locals)
 
 {-| This module implements semantic analysis to validate WebAssembly modules.
 
@@ -26,7 +26,6 @@ import Parser
 
 data Context = Context
     { types :: [(MaybeIdent, FuncType)]
-    -- , funcs :: [(MaybeIdent, FuncType)]
     , funcs :: [(MaybeIdent, TypeIndex)]
     -- add tables and mems
     , globals :: [(MaybeIdent, GlobalType)]
@@ -37,10 +36,21 @@ data Context = Context
 
 data LocalContext = LocalContext
     { locals :: [(MaybeIdent, ValType)]
-    , labels :: [(MaybeIdent, ResultType)]
-    , return_ :: (MaybeIdent, ResultType)
+    , operandStack :: [Maybe ValType] -- Nothing represents Unknown
+    , controlStack :: [ControlFrame]
     }
 
+
+data ControlFrame = ControlFrame
+   { labelTypes :: [ValType]  -- [ResultType] ??
+   , resultType :: ResultType
+   , height :: Int
+   , unreachable :: Bool
+   }
+
+  -- it seems like we should track labels but we don't?
+  -- , labels :: [(MaybeIdent, ResultType)]
+  -- , return_ :: (MaybeIdent, ResultType)   -- Maybe return_?
 
 type Types = [(MaybeIdent, FuncType)]
 
@@ -48,6 +58,10 @@ type TypeIndex = Word32
 
 type Funcs = [(MaybeIdent, TypeIndex)]
 
+
+type ContextState = StateT Context IO
+
+type ValidationState = StateT (Context, LocalContext) IO
 
 
 -- CHECK
@@ -95,9 +109,9 @@ checkImportOrder :: Components ParserIdX -> Bool
 checkImportOrder components =
     fst $ foldl importsFirst (True, True) components
 
-  
+
 importsFirst :: (Bool, Bool) -> Component ParserIdX -> (Bool, Bool)
-importsFirst (inOrder, stillImporting) component = 
+importsFirst (inOrder, stillImporting) component =
     case component of
         Import _ _ _ -> (True && stillImporting, stillImporting)
         Func _ _ _ _ -> (inOrder, False && stillImporting)
@@ -115,9 +129,9 @@ importsFirst (inOrder, stillImporting) component =
   The second pass collects imports, funcs, globals, and exports. Any InlineTypes that
   do not exist by some other name in the context are added in this pass.
 -}
-  
 
-makeContext :: Components ParserIdX -> StateT Context IO ()
+
+makeContext :: Components ParserIdX -> ContextState ()
 makeContext components = do
     liftIO $ putStrLn "② Adding types to the context..."
     mapM_ registerType components
@@ -126,7 +140,7 @@ makeContext components = do
     mapM_ registerComponent components
 
 
-registerType :: Component ParserIdX -> StateT Context IO ()
+registerType :: Component ParserIdX -> ContextState ()
 registerType component = do
      context <- get
      case component of
@@ -137,7 +151,7 @@ registerType component = do
          _ -> return ()
 
 
-registerComponent :: Component ParserIdX -> StateT Context IO ()
+registerComponent :: Component ParserIdX -> ContextState ()
 registerComponent component = do
     context <- get
     case component of
@@ -158,7 +172,7 @@ registerComponent component = do
             return ()
 
 
-registerImport :: ImportDescription ParserIdX -> StateT Context IO ()
+registerImport :: ImportDescription ParserIdX -> ContextState ()
 registerImport importdesc = do
     context <- get
     case importdesc of
@@ -167,7 +181,7 @@ registerImport importdesc = do
         -- add table, memory, and global imports here
 
 
-registerFunc :: MaybeIdent -> TypeUse ParserIdX -> StateT Context IO ()
+registerFunc :: MaybeIdent -> TypeUse ParserIdX -> ContextState ()
 registerFunc maybeId typeuse = do
     context <- get
     case typeuse of
@@ -211,7 +225,7 @@ registerFunc maybeId typeuse = do
    The position of each entry is its index.
 -}
 
-addContextEntry :: String -> MaybeIdent -> a -> [(MaybeIdent, a)] -> StateT Context IO [(MaybeIdent, a)]
+addContextEntry :: String -> MaybeIdent -> a -> [(MaybeIdent, a)] -> ContextState [(MaybeIdent, a)]
 addContextEntry indexSpaceName maybeId typedref indexSpace =
     case maybeId of
         Just id ->
@@ -232,11 +246,11 @@ uniqueIdentifier id indexSpace =
 
 -- TYPEUSE
 
-  
-checkTypeUse :: ParserIdX -> StateT Context IO (Maybe TypeIndex)
+
+checkTypeUse :: ParserIdX -> ContextState (Maybe TypeIndex)
 checkTypeUse idx = do
     context <- get
-    case lookupTypeRef idx (types context) of
+    case lookupByIdX idx (types context) of
         Just _ ->
             case idx of
                 Left n   -> return $ Just n
@@ -244,13 +258,13 @@ checkTypeUse idx = do
         Nothing -> do
             liftIO $ putStrLn $ missingTypeError idx
             put (context { valid = False })
-            return Nothing 
+            return Nothing
 
-  
-checkTypeUseWithDeclarations :: ParserIdX -> Params -> Results -> StateT Context IO (Maybe TypeIndex)
+
+checkTypeUseWithDeclarations :: ParserIdX -> Params -> Results -> ContextState (Maybe TypeIndex)
 checkTypeUseWithDeclarations idx params results = do
     context <- get
-    case lookupTypeRef idx (types context) of
+    case lookupByIdX idx (types context) of
         Just functype ->
             case functype of
                 FuncType contextParams contextResults -> do
@@ -267,7 +281,7 @@ checkTypeUseWithDeclarations idx params results = do
         Nothing -> do
             liftIO $ putStrLn $ missingTypeError idx
             put (context { valid = False })
-            return Nothing 
+            return Nothing
 
 
 
@@ -300,13 +314,13 @@ checkResult (Result contextValtype, Result referenceValtype) =
   Check func bodies.
   Check that Start and Exports reference a valid func indices.
 -}
- 
-check_ :: Components ParserIdX -> StateT Context IO ()
+
+check_ :: Components ParserIdX -> ContextState ()
 check_ components =
     mapM_ checkFuncs components
 
 
-checkFuncs :: Component ParserIdX -> StateT Context IO ()
+checkFuncs :: Component ParserIdX -> ContextState ()
 checkFuncs component = do
     context <- get
     case component of
@@ -314,9 +328,11 @@ checkFuncs component = do
             return ()
         Import _ _ _ ->
             return ()
-        Func maybeId typeuse _ _ -> do
+        Func _ typeuse locals instructions -> do
+            -- liftIO $ printStep context component
+            liftIO $ printFuncStep component
+            checkFunc typeuse locals instructions
             -- check func body
-            liftIO $ printStep context component
             return ()
         Start idx -> do
             liftIO $ printStep context component
@@ -329,11 +345,23 @@ checkFuncs component = do
             checkExport exportdesc
 
 
-checkStart :: ParserIdX -> StateT Context IO ()
+checkFunc :: TypeUse ParserIdX -> Locals -> Instructions ParserIdX -> ContextState ()
+checkFunc typeuse locals instructions = do
+    context <- get
+    bodyLocals <- makeBodyLocals typeuse locals
+    result <- lookupResult typeuse
+    let controlFrame = ControlFrame {labelTypes = [], resultType = result , height = 0, unreachable = False}
+        emptyLocalContext = LocalContext { locals = bodyLocals, operandStack = [], controlStack = [controlFrame] } in do
+        (_, (checkedContext, _)) <- lift $ runStateT (checkBlock instructions) (context, emptyLocalContext)
+        put (context { valid = valid checkedContext })
+        return ()
+
+
+checkStart :: ParserIdX -> ContextState ()
 checkStart idx = do
     context <- get
     if null (start context) then
-        case lookupFuncRef idx (funcs context) of
+        case lookupByIdX idx (funcs context) of
             Just _ -> do
                 put (context { start = Just idx })
                 return ()
@@ -345,14 +373,14 @@ checkStart idx = do
         put (context { valid = False })
         liftIO $ putStrLn $ multipleStartError
         return ()
-   
 
-checkExport :: ExportDescription ParserIdX -> StateT Context IO ()
+
+checkExport :: ExportDescription ParserIdX -> ContextState ()
 checkExport exportdesc = do
     context <- get
     case exportdesc of
        FuncExport idx ->
-           case lookupFuncRef idx (funcs context) of
+           case lookupByIdX idx (funcs context) of
                Just _ ->
                    return ()
                Nothing -> do
@@ -360,25 +388,407 @@ checkExport exportdesc = do
                    liftIO $ putStrLn $ missingTypeError idx
                    return ()
 
- 
+
+
+-- CHECK FUNC BODY
+
+
+checkBlock :: Instructions ParserIdX -> ValidationState ()
+checkBlock instructions = do
+    mapM_ checkInstruction instructions
+    (_, localContext) <- get
+    liftIO $ putStrLn $ show localContext
+    popControlFrame
+    return ()
+
+
+checkInstruction :: Instruction ParserIdX -> ValidationState ()
+checkInstruction instruction = do
+    (context, localContext) <- get
+    liftIO $ printInstructionStep instruction localContext
+    case instruction of
+        -- control instructions [§3.3.5]
+        Block maybeIdent resultType instructions              -> return ()
+        Loop maybeIdent resultType instructions               -> return ()
+        Conditional maybeIdent resultType ifInstrs elseInstrs -> return ()
+        Unreachable                                           -> return ()
+        Nop                                                   -> return ()
+        Br idx                                                -> return ()
+        BrIf idx                                              -> return ()
+        BrTable idxs idx                                      -> return ()
+        Return                                                -> return ()
+        Call idx                                              -> return ()
+        CallIndirect typeuse                                  -> return ()
+
+        -- parametric instructions [§3.3.2]
+        Drop   -> do
+            popOpd
+            return ()
+        Select -> return ()
+
+        -- variable instructions [§3.3.3]
+        LocalGet idx -> do
+            locals <- return $ locals localContext
+            maybeValtype <- return $ lookupByIdX idx locals
+            case maybeValtype of
+                Just valtype -> do
+                    pushOpd valtype
+                    return ()
+                Nothing ->
+                    fail $ "🗙 Could not find local" ++ show idx
+
+        LocalSet idx  -> return ()
+        LocalTee idx  -> return ()
+        GlobalGet idx -> return ()
+        GlobalSet idx -> return ()
+
+        -- add memory instructions [§3.3.4]
+
+        -- numeric instructions [§3.3.1]
+        I32Const _            -> checkConstOp I32
+        I64Const _            -> checkConstOp I64
+        F32Const _            -> checkConstOp F32
+        F64Const _            -> checkConstOp F64
+
+        I32Clz                -> checkUnOp I32
+        I32Ctz                -> checkUnOp I32
+        I32Popcnt             -> checkUnOp I32
+        I32Add                -> checkBinOp I32
+        I32Sub                -> checkBinOp I32
+        I32Mul                -> checkBinOp I32
+        I32Div Signed         -> checkBinOp I32
+        I32Div Unsigned       -> checkBinOp I32
+        I32Rem Signed         -> checkBinOp I32
+        I32Rem Unsigned       -> checkBinOp I32
+        I32And                -> checkBinOp I32
+        I32Or                 -> checkBinOp I32
+        I32Xor                -> checkBinOp I32
+        I32Shl                -> checkBinOp I32
+        I32Shr Signed         -> checkBinOp I32
+        I32Shr Unsigned       -> checkBinOp I32
+        I32Rotl               -> checkBinOp I32
+        I32Rotr               -> checkBinOp I32
+
+        I64Clz                -> checkUnOp I64
+        I64Ctz                -> checkUnOp I64
+        I64Popcnt             -> checkUnOp I64
+        I64Add                -> checkBinOp I64
+        I64Sub                -> checkBinOp I64
+        I64Mul                -> checkBinOp I64
+        I64Div Signed         -> checkBinOp I64
+        I64Div Unsigned       -> checkBinOp I64
+        I64Rem Signed         -> checkBinOp I64
+        I64Rem Unsigned       -> checkBinOp I64
+        I64And                -> checkBinOp I64
+        I64Or                 -> checkBinOp I64
+        I64Xor                -> checkBinOp I64
+        I64Shl                -> checkBinOp I64
+        I64Shr Signed         -> checkBinOp I64
+        I64Shr Unsigned       -> checkBinOp I64
+        I64Rotl               -> checkBinOp I64
+        I64Rotr               -> checkBinOp I64
+
+        F32Abs                -> checkUnOp F32
+        F32Neg                -> checkUnOp F32
+        F32Ceil               -> checkUnOp F32
+        F32Floor              -> checkUnOp F32
+        F32Trunc              -> checkUnOp F32
+        F32Nearest            -> checkUnOp F32
+        F32Sqrt               -> checkBinOp F32
+        F32Add                -> checkBinOp F32
+        F32Sub                -> checkBinOp F32
+        F32Mul                -> checkBinOp F32
+        F32Div                -> checkBinOp F32
+        F32Min                -> checkBinOp F32
+        F32Max                -> checkBinOp F32
+        F32Copysign           -> checkBinOp F32
+
+        F64Abs                -> checkUnOp F64
+        F64Neg                -> checkUnOp F64
+        F64Ceil               -> checkUnOp F64
+        F64Floor              -> checkUnOp F64
+        F64Trunc              -> checkUnOp F64
+        F64Nearest            -> checkUnOp F64
+        F64Sqrt               -> checkBinOp F64
+        F64Add                -> checkBinOp F64
+        F64Sub                -> checkBinOp F64
+        F64Mul                -> checkBinOp F64
+        F64Div                -> checkBinOp F64
+        F64Min                -> checkBinOp F64
+        F64Max                -> checkBinOp F64
+        F64Copysign           -> checkBinOp F64
+
+        I32Eqz                -> checkTestOp I32
+        I32Eq                 -> checkRelOp I32
+        I32Ne                 -> checkRelOp I32
+        I32Lt Signed          -> checkRelOp I32
+        I32Lt Unsigned        -> checkRelOp I32
+        I32Gt Signed          -> checkRelOp I32
+        I32Gt Unsigned        -> checkRelOp I32
+        I32Le Signed          -> checkRelOp I32
+        I32Le Unsigned        -> checkRelOp I32
+        I32Ge Signed          -> checkRelOp I32
+        I32Ge Unsigned        -> checkRelOp I32
+
+        I64Eqz                -> checkTestOp I64
+        I64Eq                 -> checkRelOp I64
+        I64Ne                 -> checkRelOp I64
+        I64Lt Signed          -> checkRelOp I64
+        I64Lt Unsigned        -> checkRelOp I64
+        I64Gt Signed          -> checkRelOp I64
+        I64Gt Unsigned        -> checkRelOp I64
+        I64Le Signed          -> checkRelOp I64
+        I64Le Unsigned        -> checkRelOp I64
+        I64Ge Signed          -> checkRelOp I64
+        I64Ge Unsigned        -> checkRelOp I64
+
+        F32Eq                 -> checkRelOp F32
+        F32Ne                 -> checkRelOp F32
+        F32Lt                 -> checkRelOp F32
+        F32Gt                 -> checkRelOp F32
+        F32Le                 -> checkRelOp F32
+        F32Ge                 -> checkRelOp F32
+
+        F64Eq                 -> checkRelOp F64
+        F64Ne                 -> checkRelOp F64
+        F64Lt                 -> checkRelOp F64
+        F64Gt                 -> checkRelOp F64
+        F64Le                 -> checkRelOp F64
+        F64Ge                 -> checkRelOp F64
+
+        I32WrapI64             -> checkCvtOp I64 I32
+        I32TruncF32 Signed     -> checkCvtOp F32 I32
+        I32TruncF32 Unsigned   -> checkCvtOp F32 I32
+        I32TruncF64 Signed     -> checkCvtOp F64 I32
+        I32TruncF64 Unsigned   -> checkCvtOp F64 I32
+        I64ExtendI32 Signed    -> checkCvtOp I32 I64
+        I64ExtendI32 Unsigned  -> checkCvtOp I32 I64
+        I64TruncF32 Signed     -> checkCvtOp F32 I64
+        I64TruncF32 Unsigned   -> checkCvtOp F32 I64
+        I64TruncF64 Signed     -> checkCvtOp F64 I64
+        I64TruncF64 Unsigned   -> checkCvtOp F64 I64
+        F32ConvertI32 Signed   -> checkCvtOp I32 F32
+        F32ConvertI32 Unsigned -> checkCvtOp I32 F32
+        F32ConvertI64 Signed   -> checkCvtOp I64 F32
+        F32ConvertI64 Unsigned -> checkCvtOp I64 F32
+        F32DemoteF64           -> checkCvtOp F64 F32
+        F64ConvertI32 Signed   -> checkCvtOp I32 F64
+        F64ConvertI32 Unsigned -> checkCvtOp I32 F64
+        F64ConvertI64 Signed   -> checkCvtOp I64 F64
+        F64ConvertI64 Unsigned -> checkCvtOp I64 F64
+        F64PromoteF32          -> checkCvtOp F32 F64
+        I32ReinterpretF32      -> checkCvtOp F32 I32
+        I64ReinterpretF64      -> checkCvtOp F64 I64
+        F32ReinterpretI32      -> checkCvtOp I32 F32
+        F64ReinterpretI64      -> checkCvtOp I64 F64
+
+
+
+-- NUMERIC INSTRUCTION CHECKS
+
+
+checkConstOp :: ValType -> ValidationState ()
+checkConstOp vt = do
+    pushOpd vt
+    return ()
+
+
+checkBinOp :: ValType -> ValidationState ()
+checkBinOp vt = do
+    popCheckOpd (Just vt)
+    popCheckOpd (Just vt)
+    pushOpd vt
+    return ()
+
+
+checkUnOp :: ValType -> ValidationState ()
+checkUnOp vt = do
+    popCheckOpd (Just vt)
+    pushOpd vt
+    return ()
+
+
+checkTestOp :: ValType -> ValidationState ()
+checkTestOp vt = do
+    popCheckOpd (Just vt)
+    pushOpd I32
+    return ()
+
+
+checkRelOp :: ValType -> ValidationState ()
+checkRelOp vt = do
+    popCheckOpd (Just vt)
+    popCheckOpd (Just vt)
+    pushOpd I32
+    return ()
+
+
+checkCvtOp :: ValType -> ValType -> ValidationState ()
+checkCvtOp vt1 vt2 = do
+    popCheckOpd (Just vt1)
+    pushOpd vt2
+    return ()
+
+
+
+-- OPERAND AND CONTROL STACK MANIPULATION
+
+
+popOpd :: ValidationState (Maybe ValType)
+popOpd = do
+    (context, localContext) <- get
+    operandStack <- return $ operandStack localContext
+    -- controlFrame <- return $ head $ controlStack localContext  -- TODO: head is not safe!
+    controlStack <- return $ controlStack localContext  -- TODO: head is not safe!
+    case safeHead controlStack of
+        Right controlFrame ->
+            if (length operandStack == height controlFrame && unreachable controlFrame) then
+                return Nothing
+            else if (length operandStack == height controlFrame) then do
+                liftIO $ putStrLn "🗙 Pop operation undeflows the current block"
+                fail ""
+            else
+                case operandStack of
+                    op:ops -> do
+                        put (context, localContext { operandStack = ops })
+                        return op
+                    []     -> do
+                        fail "🗙 Cannot pop an empty operand stack."
+        Left err ->
+            fail err
+
+popCheckOpd :: Maybe ValType ->  ValidationState (Maybe ValType)
+popCheckOpd expect = do
+    actual <- popOpd
+    if (actual == Nothing) then
+        return expect
+    else if (expect == Nothing) then
+        return actual
+    else
+        if (actual /= expect) then
+            fail "🗙 Actual operand does not match expected operand."
+        else
+            return actual
+
+
+pushOpd :: ValType -> ValidationState ()
+pushOpd valtype = do
+    (context, localContext) <- get
+    ops <- return $ operandStack localContext
+    put (context, localContext { operandStack = (Just valtype) : ops })
+    return ()
+
+
+popControlFrame :: ValidationState (Maybe ValType)
+popControlFrame = do
+    (context, localContext) <- get
+    controlStack <- return $ controlStack localContext
+    case (listToMaybe controlStack) of
+        Just frame -> do
+            maybeValtype <- return $ resultTypeToMaybe $ resultType frame
+            result <- maybePopStack maybeValtype
+            (_, localContext) <- get
+            operandStack <- return $ operandStack localContext
+            if ((length operandStack) /= (height frame)) then do
+                liftIO $ putStrLn "🗙 The operand stack was not returned to its initial height at the end of this func."
+                fail ""
+            else
+                case safeTail controlStack of
+                    Right newStack -> do
+                        put (context, localContext { controlStack = newStack })
+                        return result
+                        -- algorithm suggests returning this, but why did we check?
+                        -- return (resultType frame)
+                    Left err       ->
+                        fail err
+        Nothing ->
+            fail "🗙 Attempt to pop a control frame but there are none."
+
+
+maybePopStack :: Maybe ValType -> ValidationState (Maybe ValType)
+maybePopStack maybeResult =
+    case maybeResult of
+       Just valtype -> do
+           result <- popCheckOpd (Just valtype)
+           return (Just valtype)
+       Nothing ->
+           return Nothing
+
+
+pushControlFrame :: [ValType] -> ResultType -> ValidationState ()
+pushControlFrame labels result = do
+    (context, localContext) <- get
+    frames <- return $ controlStack localContext
+    ops <- return $ operandStack localContext
+    let frame = ControlFrame { labelTypes = labels, resultType = result, height = length ops, unreachable = False } in do
+        put (context, localContext { controlStack = frame : frames})
+        return ()
+
+
+safeHead :: [a] -> Either String a
+safeHead as =
+    case as of
+        a:as -> Right a
+        []   -> Left "🗙 Cannot peek at the top of an empty stack"
+
+
+safeTail :: [a] -> Either String [a]
+safeTail as =
+    case as of
+        a:as -> Right as
+        []   -> Left "🗙 Cannot delete the top of an empty stack"
+
+
+resultTypeToMaybe :: ResultType -> Maybe ValType
+resultTypeToMaybe resultType =
+    case resultType of
+        Just result ->
+            case result of
+                Result valtype -> Just valtype
+        Nothing -> Nothing
+
+
+
+
+-- ASSEMBLE FUNC LOCALS
+
+
+makeBodyLocals :: TypeUse ParserIdX -> Locals -> ContextState [(MaybeIdent, ValType)]
+makeBodyLocals typeuse locals = do
+    maybeParams <- lookupParams typeuse
+    case maybeParams of
+        Just params -> do
+            ps <- return $ map paramToBodyLocal params
+            ls <- return $ map localToBodyLocal locals
+            return (ps ++ ls)
+        Nothing -> do
+            liftIO $ putStrLn "Missing params because missing function - but we already know it is there!"
+            return []
+
+
+-- toBodyLocal :: a -> (MaybeIdent, ValType)
+-- toBodyLocal (Param maybeIdent valtype) = (maybeIdent, valtype)
+-- toBodyLocal (Local maybeIdent valtype) = (maybeIdent, valtype)
+
+paramToBodyLocal :: Param -> (MaybeIdent, ValType)
+paramToBodyLocal (Param maybeIdent valtype) =
+    (maybeIdent, valtype)
+
+
+localToBodyLocal :: Local -> (MaybeIdent, ValType)
+localToBodyLocal (Local maybeIdent valtype) =
+    (maybeIdent, valtype)
+
 
 
 -- LOOKUP
 
 
-lookupTypeRef :: ParserIdX -> Types -> Maybe FuncType
-lookupTypeRef idx types =
+lookupByIdX :: ParserIdX -> [(MaybeIdent, a)] -> Maybe a
+lookupByIdX idx entries =
     case idx of
-        Left n   -> lookupByIndex n types
-        Right id -> lookupById id types
-
-
-lookupFuncRef :: ParserIdX -> Funcs -> Maybe TypeIndex
-lookupFuncRef idx funcs =
-    case idx of
-        Left n   -> lookupByIndex n funcs
-        Right id -> lookupById id funcs
-
+        Left n   -> lookupByIndex n entries
+        Right id -> lookupById id entries
 
 
 lookupByIndex :: Word32 -> [(MaybeIdent, a)] -> Maybe a
@@ -409,6 +819,46 @@ lookupType type_ xs =
     listToMaybe $ [ i | (x,i) <- zip xs [0..], type_ == snd x ]
 
 
+lookupParams :: TypeUse ParserIdX -> ContextState (Maybe Params)
+lookupParams typeuse =
+    case typeuse of
+        TypeUse idx -> do
+            context <- get
+            maybeFuncType <- return $ lookupByIdX idx (types context)
+            case maybeFuncType of
+                Just functype ->
+                    case functype of
+                        FuncType params _ ->
+                            return (Just params)
+                Nothing -> do
+                    liftIO $ putStrLn $ missingTypeError idx
+                    return Nothing
+        TypeUseWithDeclarations idx params results ->
+            return (Just params)
+        InlineType params results ->
+            return (Just params)
+
+
+lookupResult :: TypeUse ParserIdX -> ContextState ResultType
+lookupResult typeuse =
+    case typeuse of
+        TypeUse idx -> do
+            context <- get
+            maybeFuncType <- return $ lookupByIdX idx (types context)
+            case maybeFuncType of
+                Just functype ->
+                    case functype of
+                        FuncType _ results ->
+                            return (listToMaybe results)
+                Nothing -> do
+                    liftIO $ putStrLn $ missingTypeError idx
+                    return Nothing
+        TypeUseWithDeclarations idx params results ->
+            return (listToMaybe results)
+        InlineType params results ->
+            return (listToMaybe results)
+
+
 -- SHOW
 
 
@@ -420,6 +870,22 @@ instance Show Context where
         ++ indent 1 ++ "start" ++ showMaybeIdX start ++ "\n"
         ++ indent 1 ++ "valid " ++ show valid
         ++ "\n"
+
+instance Show LocalContext where
+    show (LocalContext locals operandStack controlStack) = "• local context •" ++ "\n"
+        ++ indent 1 ++ "locals\n" ++ (concat $ map showType locals)
+        ++ indent 1 ++ "operand stack\n"
+        ++ indent 3 ++ "[" ++ (concat $ map showMaybeValtype operandStack) ++ " ]" ++ "\n"
+        ++ indent 1 ++ "control stack\n" ++ (concat $ map showControlFrame $ zip [0..] controlStack)
+        -- ++ "\n"
+
+instance Show ControlFrame where
+    show (ControlFrame labelTypes resultType height unreachable) =
+        "label types [" ++ (concat $ map show labelTypes) ++ " ]\n"
+            ++ indent 5 ++ "result type" ++ (showResultType resultType) ++ "\n"
+            ++ indent 5 ++ "entry height " ++ show height ++ "\n"
+            ++ indent 5 ++ "unreachable " ++ show unreachable
+            ++ "\n"
 
 instance Show FuncType where
     show (FuncType params results) =
@@ -476,6 +942,29 @@ showMaybeIdX maybeIdX =
         Nothing -> ""
 
 
+showMaybeValtype :: Maybe ValType -> String
+showMaybeValtype maybeValtype =
+    case maybeValtype of
+        Just valtype -> show valtype
+        Nothing -> " Unknown"
+
+
+showResultType :: ResultType -> String
+showResultType resulttype =
+    case resulttype of
+        Just result -> show result
+        Nothing -> " ()"
+
+
+showControlFrame :: (Int, ControlFrame) -> String
+showControlFrame (depth, controlFrame) =
+    indent 3 ++ show depth ++ " | " ++ show controlFrame
+
+
+
+-- IO
+
+
 printStep :: Context -> Component ParserIdX -> IO ()
 printStep context component = do
     putStrLn $ show context
@@ -483,6 +972,22 @@ printStep context component = do
     putStrLn "• component •"
     printTree component
     putStrLn ""
+
+
+printInstructionStep :: Instruction ParserIdX -> LocalContext -> IO ()
+printInstructionStep instruction localContext = do
+    putStrLn $ show localContext
+    putStrLn "λ................"
+    printTree instruction
+    putStrLn ""
+
+
+printFuncStep :: Component ParserIdX -> IO ()
+printFuncStep component = do
+    putStrLn "+----------------"
+    putStrLn $ "Checking func:"
+    printTree component
+    putStr "\n"
 
 
 
@@ -504,7 +1009,7 @@ typeMismatchError idx =
 
 multipleStartError :: String
 multipleStartError =
-    "🗙 A start component has already registered and entry point to this module."
+    "🗙 A start component has already registered an entry point to this module."
 
 importOrderError :: String
 importOrderError =
