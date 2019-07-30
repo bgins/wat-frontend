@@ -490,11 +490,11 @@ checkInstruction instruction = do
 
         F32Abs                -> checkUnOp F32
         F32Neg                -> checkUnOp F32
+        F32Sqrt               -> checkUnOp F32
         F32Ceil               -> checkUnOp F32
         F32Floor              -> checkUnOp F32
         F32Trunc              -> checkUnOp F32
         F32Nearest            -> checkUnOp F32
-        F32Sqrt               -> checkBinOp F32
         F32Add                -> checkBinOp F32
         F32Sub                -> checkBinOp F32
         F32Mul                -> checkBinOp F32
@@ -505,11 +505,11 @@ checkInstruction instruction = do
 
         F64Abs                -> checkUnOp F64
         F64Neg                -> checkUnOp F64
+        F64Sqrt               -> checkUnOp F64
         F64Ceil               -> checkUnOp F64
         F64Floor              -> checkUnOp F64
         F64Trunc              -> checkUnOp F64
         F64Nearest            -> checkUnOp F64
-        F64Sqrt               -> checkBinOp F64
         F64Add                -> checkBinOp F64
         F64Sub                -> checkBinOp F64
         F64Mul                -> checkBinOp F64
