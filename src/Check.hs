@@ -91,7 +91,7 @@ check filepath = do
                             putStrLn "🗙 Invalid module"
                         return ()
                     else do
-                        putStrLn importOrderError
+                        printError ImportOrder
                         putStrLn "🗙 Invalid module"
                         return ()
                   where
@@ -145,7 +145,7 @@ registerType component = do
      context <- get
      case component of
          Type maybeId functype -> do
-             liftIO $ printStep context component
+             printStep component
              updatedTypes <- addContextEntry "type" maybeId functype (types context)
              put (context { types = updatedTypes })
          _ -> return ()
@@ -158,10 +158,10 @@ registerComponent component = do
         Type maybeId functype ->
             return ()
         Import _ _ importdesc -> do
-            liftIO $ printStep context component
+            printStep component
             registerImport importdesc
         Func maybeId typeuse _ _ -> do
-            liftIO $ printStep context component
+            printStep component
             registerFunc maybeId typeuse
         Start _ ->
             return ()
@@ -215,7 +215,7 @@ registerFunc maybeId typeuse = do
                             updatedFuncs <- addContextEntry "func" maybeId typeIndex (funcs context)
                             put (context { funcs = updatedFuncs })
                         Nothing ->
-                            liftIO $ print "I just added that type. This must be a compiler bug."
+                            liftIO $ print "!! I just added that type. This must be a compiler bug."
 
 
 
@@ -232,8 +232,7 @@ addContextEntry indexSpaceName maybeId typedref indexSpace =
             if uniqueIdentifier id indexSpace then
                 return (indexSpace ++ [(maybeId, typedref)])
             else do
-                liftIO $ putStrLn $ "Id " ++ show id
-                    ++ " already defined in " ++ indexSpaceName ++ " index space."
+                liftIO $ printError (IdAlreadyDefined id indexSpaceName)
                 return indexSpace
         Nothing -> return (indexSpace ++ [(Nothing, typedref)])
 
@@ -256,7 +255,7 @@ checkTypeUse idx = do
                 Left n   -> return $ Just n
                 Right id -> return $ resolveId (Just id) (types context)
         Nothing -> do
-            liftIO $ putStrLn $ missingTypeError idx
+            liftIO $ printError (MissingType idx)
             put (context { valid = False })
             return Nothing
 
@@ -275,11 +274,11 @@ checkTypeUseWithDeclarations idx params results = do
                             Left n   -> return $ Just n
                             Right id -> return $ resolveId (Just id) (types context)
                     else do
-                        liftIO $ putStrLn $ typeMismatchError idx
+                        liftIO $ printError (TypeDeclMismatch idx)
                         put (context { valid = False })
                         return Nothing
         Nothing -> do
-            liftIO $ putStrLn $ missingTypeError idx
+            liftIO $ printError (MissingType idx)
             put (context { valid = False })
             return Nothing
 
@@ -329,19 +328,17 @@ checkFuncs component = do
         Import _ _ _ ->
             return ()
         Func _ typeuse locals instructions -> do
-            -- liftIO $ printStep context component
-            liftIO $ printFuncStep component
+            printFuncStep component
             checkFunc typeuse locals instructions
-            -- check func body
             return ()
         Start idx -> do
-            liftIO $ printStep context component
+            printStep component
             checkStart idx
         Global maybeId globaltype _ ->
             -- check function expressions
             return ()
         Export _ exportdesc -> do
-            liftIO $ printStep context component
+            printStep component
             checkExport exportdesc
 
 
@@ -367,11 +364,11 @@ checkStart idx = do
                 return ()
             Nothing -> do
                 put (context { valid = False })
-                liftIO $ putStrLn $ missingTypeError idx
+                liftIO $ printError (MissingType idx)
                 return ()
     else do
         put (context { valid = False })
-        liftIO $ putStrLn $ multipleStartError
+        liftIO $ printError MultipleStart
         return ()
 
 
@@ -385,7 +382,7 @@ checkExport exportdesc = do
                    return ()
                Nothing -> do
                    put (context { valid = False })
-                   liftIO $ putStrLn $ missingTypeError idx
+                   liftIO $ printError (MissingType idx)
                    return ()
 
 
@@ -395,17 +392,22 @@ checkExport exportdesc = do
 
 checkBlock :: Instructions ParserIdX -> ValidationState ()
 checkBlock instructions = do
-    mapM_ checkInstruction instructions
-    (_, localContext) <- get
-    liftIO $ putStrLn $ show localContext
+    printBlockEntry
+    mapM_ checkInstructionStep instructions
     popControlFrame
+    printBlockExit
     return ()
+
+
+checkInstructionStep :: Instruction ParserIdX -> ValidationState ()
+checkInstructionStep instruction = do
+    checkInstruction instruction
+    printInstructionStep instruction
 
 
 checkInstruction :: Instruction ParserIdX -> ValidationState ()
 checkInstruction instruction = do
     (context, localContext) <- get
-    liftIO $ printInstructionStep instruction localContext
     case instruction of
         -- control instructions [§3.3.5]
         Block maybeIdent resultType instructions              -> return ()
@@ -645,7 +647,7 @@ popOpd = do
             if (length operandStack == height controlFrame && unreachable controlFrame) then
                 return Nothing
             else if (length operandStack == height controlFrame) then do
-                liftIO $ putStrLn "🗙 Pop operation undeflows the current block"
+                liftIO $ printError Underflow
                 fail ""
             else
                 case operandStack of
@@ -653,7 +655,8 @@ popOpd = do
                         put (context, localContext { operandStack = ops })
                         return op
                     []     -> do
-                        fail "🗙 Cannot pop an empty operand stack."
+                        liftIO $ printError PopEmptyOps
+                        fail ""
         Left err ->
             fail err
 
@@ -665,8 +668,9 @@ popCheckOpd expect = do
     else if (expect == Nothing) then
         return actual
     else
-        if (actual /= expect) then
-            fail "🗙 Actual operand does not match expected operand."
+        if (actual /= expect) then do
+            liftIO $ printError OperandMismatch
+            fail ""
         else
             return actual
 
@@ -690,7 +694,7 @@ popControlFrame = do
             (_, localContext) <- get
             operandStack <- return $ operandStack localContext
             if ((length operandStack) /= (height frame)) then do
-                liftIO $ putStrLn "🗙 The operand stack was not returned to its initial height at the end of this func."
+                liftIO $ printError ExitHeightMismatch
                 fail ""
             else
                 case safeTail controlStack of
@@ -701,8 +705,9 @@ popControlFrame = do
                         -- return (resultType frame)
                     Left err       ->
                         fail err
-        Nothing ->
-            fail "🗙 Attempt to pop a control frame but there are none."
+        Nothing -> do
+            liftIO $ printError PopEmptyFrames
+            fail ""
 
 
 maybePopStack :: Maybe ValType -> ValidationState (Maybe ValType)
@@ -831,7 +836,7 @@ lookupParams typeuse =
                         FuncType params _ ->
                             return (Just params)
                 Nothing -> do
-                    liftIO $ putStrLn $ missingTypeError idx
+                    liftIO $ printError (MissingType idx)
                     return Nothing
         TypeUseWithDeclarations idx params results ->
             return (Just params)
@@ -851,7 +856,7 @@ lookupResult typeuse =
                         FuncType _ results ->
                             return (listToMaybe results)
                 Nothing -> do
-                    liftIO $ putStrLn $ missingTypeError idx
+                    liftIO $ printError (MissingType idx)
                     return Nothing
         TypeUseWithDeclarations idx params results ->
             return (listToMaybe results)
@@ -863,7 +868,7 @@ lookupResult typeuse =
 
 
 instance Show Context where
-    show (Context types funcs globals start valid) = "• context •" ++ "\n"
+    show (Context types funcs globals start valid) = "∙context∙" ++ "\n"
         ++ indent 1 ++ "types\n" ++ (concat $ map showType types)
         ++ indent 1 ++ "funcs\n" ++ (concat $ map showTypeRef funcs)
         ++ indent 1 ++ "globals\n" ++ (concat $ map showType globals)
@@ -872,7 +877,7 @@ instance Show Context where
         ++ "\n"
 
 instance Show LocalContext where
-    show (LocalContext locals operandStack controlStack) = "• local context •" ++ "\n"
+    show (LocalContext locals operandStack controlStack) = "∙local context∙" ++ "\n"
         ++ indent 1 ++ "locals\n" ++ (concat $ map showType locals)
         ++ indent 1 ++ "operand stack\n"
         ++ indent 3 ++ "[" ++ (concat $ map showMaybeValtype operandStack) ++ " ]" ++ "\n"
@@ -961,56 +966,115 @@ showControlFrame (depth, controlFrame) =
     indent 3 ++ show depth ++ " | " ++ show controlFrame
 
 
-
--- IO
-
-
-printStep :: Context -> Component ParserIdX -> IO ()
-printStep context component = do
-    putStrLn $ show context
-    putStrLn "+----------------"
-    putStrLn "• component •"
-    printTree component
-    putStrLn ""
+showInstructionContext :: LocalContext -> String
+showInstructionContext localContext =
+    case localContext of
+        LocalContext locals operandStack _ ->
+            indent 1 ++ "locals\n" ++ (concat $ map showType locals)
+                ++ indent 1 ++ "operand stack\n"
+                ++ indent 3 ++ "[" ++ (concat $ map showMaybeValtype operandStack) ++ " ]"
+                ++ "\n"
 
 
-printInstructionStep :: Instruction ParserIdX -> LocalContext -> IO ()
-printInstructionStep instruction localContext = do
-    putStrLn $ show localContext
-    putStrLn "λ................"
-    printTree instruction
-    putStrLn ""
+-- PRINT
 
 
-printFuncStep :: Component ParserIdX -> IO ()
+printStep :: Component ParserIdX -> ContextState ()
+printStep component = do
+    context <- get
+    liftIO $ putStrLn $ show context
+    liftIO $ putStrLn "🞅∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙🞅"
+    liftIO $ putStrLn "∙component∙"
+    liftIO $ printTree component
+    liftIO $ putStr "\n"
+    return ()
+
+
+printFuncStep :: Component ParserIdX -> ContextState ()
 printFuncStep component = do
-    putStrLn "+----------------"
-    putStrLn $ "Checking func:"
-    printTree component
-    putStr "\n"
+    liftIO $ putStrLn "λ••••••••••••••••"
+    liftIO $ putStrLn $ "∙check∙"
+    liftIO $ printTree component
+    liftIO $ putStr "\n"
+    return ()
+
+
+printBlockEntry :: ValidationState ()
+printBlockEntry = do
+    (_, localContext) <- get
+    liftIO $ putStrLn "🞎∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙"
+    liftIO $ putStrLn $ show localContext ++ "\n"
+    return ()
+
+
+printBlockExit :: ValidationState ()
+printBlockExit = do
+    (_, localContext) <- get
+    liftIO $ putStrLn "∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙🞎"
+    liftIO $ putStrLn $ show localContext ++ "\n"
+    return ()
+
+
+printInstructionStep :: Instruction ParserIdX -> ValidationState ()
+printInstructionStep instruction = do
+    (_, localContext) <- get
+    liftIO $ putStrLn "⬚∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙"
+    liftIO $ printTree instruction
+    liftIO $ putStrLn $ "\n" ++ showInstructionContext localContext ++ "\n"
+    return ()
 
 
 
 -- ERRORS
 
 
-missingTypeError :: ParserIdX -> String
-missingTypeError idx =
-    "🗙 I tried looking for a type with the identifier" ++ (showIdX idx) ++ " but I could not find one.\n"
+data Error = MissingType ParserIdX
+           | MissingFunc ParserIdX
+           | TypeDeclMismatch ParserIdX
+           | MultipleStart
+           | ImportOrder 
+           | IdAlreadyDefined Ident String
+           | Underflow
+           | PopEmptyOps
+           | PopEmptyFrames
+           | OperandMismatch
+           | ExitHeightMismatch
 
-missingFuncError :: ParserIdX -> String
-missingFuncError idx =
-    "🗙 I tried looking for a func with the identifier" ++ (showIdX idx) ++ " but I could not find one.\n"
 
-typeMismatchError :: ParserIdX -> String
-typeMismatchError idx =
-    "🗙 The inline declarations used in this type use do not match the reference type" ++ (showIdX idx) ++ ".\n"
-
-
-multipleStartError :: String
-multipleStartError =
-    "🗙 A start component has already registered an entry point to this module."
-
-importOrderError :: String
-importOrderError =
-    "🗙 Imports must come before any funcs, tables, memories, or globals in a valid module."
+printError :: Error -> IO ()
+printError error =
+    case error of
+        MissingType idx -> do
+            putStrLn $ "🗙 A type with the identifier" ++ (showIdX idx) ++ " could not be found\n"
+            return ()
+        MissingFunc idx -> do
+            putStrLn $ "🗙 A func with the identifier" ++ (showIdX idx) ++ " could not be found\n"
+            return ()
+        TypeDeclMismatch idx -> do
+            putStrLn $ "🗙 The inline declarations used in this type use do not match the reference type" ++ (showIdX idx) ++ "\n"
+            return ()
+        MultipleStart -> do
+            putStrLn $ "🗙 A start component has already registered an entry point to this module"
+            return ()
+        ImportOrder -> do
+            putStrLn $ "🗙 Imports must come before any funcs, tables, memories, or globals in a valid module"
+            return ()
+        IdAlreadyDefined id indexSpaceName -> do
+            putStrLn $ "The identifier " ++ show id
+                ++ " already defined in " ++ indexSpaceName ++ " index space."
+            return ()
+        Underflow -> do
+            putStrLn "🗙 Pop operation undeflows the current block"
+            return ()
+        PopEmptyOps -> do
+            putStrLn "🗙 Cannot pop an empty operand stack."
+            return ()
+        PopEmptyFrames -> do
+            putStrLn "🗙 Attempt to pop a control frame but there are none."
+            return ()
+        OperandMismatch -> do
+            putStrLn "🗙 Actual operand does not match expected operand."
+            return ()
+        ExitHeightMismatch -> do
+            putStrLn "🗙 The operand stack was not returned to its initial height at the end of this func."
+            return ()
