@@ -209,6 +209,8 @@ registerFunc maybeId typeuse = do
                     updatedTypes <- addContextEntry "type" Nothing (FuncType params results) (types context)
                     put (context { types = updatedTypes })
                     context <- get
+                    -- before we add this as a func, we need the index -- but do we need to
+                    -- check in this way?
                     maybeIndex <- return $ lookupType (FuncType params results) (types context)
                     case maybeIndex of
                         Just typeIndex -> do
@@ -426,15 +428,20 @@ checkInstruction instruction = do
         Drop   -> do
             popOpd
             return ()
-        Select -> return ()
+        Select -> do
+            vt1 <- popOpd
+            vt2 <- popCheckOpd vt1
+            popCheckOpd (Just I32)
+            pushOpd vt2
+            return ()
 
         -- variable instructions [§3.3.3]
         LocalGet idx -> do
             locals <- return $ locals localContext
             maybeValtype <- return $ lookupByIdX idx locals
             case maybeValtype of
-                Just valtype -> do
-                    pushOpd valtype
+                Just vt -> do
+                    pushOpd (Just vt)
                     return ()
                 Nothing ->
                     fail $ "🗙 Could not find local" ++ show idx
@@ -591,7 +598,7 @@ checkInstruction instruction = do
 
 checkConstOp :: ValType -> ValidationState ()
 checkConstOp vt = do
-    pushOpd vt
+    pushOpd (Just vt)
     return ()
 
 
@@ -599,21 +606,21 @@ checkBinOp :: ValType -> ValidationState ()
 checkBinOp vt = do
     popCheckOpd (Just vt)
     popCheckOpd (Just vt)
-    pushOpd vt
+    pushOpd (Just vt)
     return ()
 
 
 checkUnOp :: ValType -> ValidationState ()
 checkUnOp vt = do
     popCheckOpd (Just vt)
-    pushOpd vt
+    pushOpd (Just vt)
     return ()
 
 
 checkTestOp :: ValType -> ValidationState ()
 checkTestOp vt = do
     popCheckOpd (Just vt)
-    pushOpd I32
+    pushOpd (Just I32)
     return ()
 
 
@@ -621,14 +628,14 @@ checkRelOp :: ValType -> ValidationState ()
 checkRelOp vt = do
     popCheckOpd (Just vt)
     popCheckOpd (Just vt)
-    pushOpd I32
+    pushOpd (Just I32)
     return ()
 
 
 checkCvtOp :: ValType -> ValType -> ValidationState ()
 checkCvtOp vt1 vt2 = do
     popCheckOpd (Just vt1)
-    pushOpd vt2
+    pushOpd (Just vt2)
     return ()
 
 
@@ -641,7 +648,7 @@ popOpd = do
     (context, localContext) <- get
     operandStack <- return $ operandStack localContext
     -- controlFrame <- return $ head $ controlStack localContext  -- TODO: head is not safe!
-    controlStack <- return $ controlStack localContext  -- TODO: head is not safe!
+    controlStack <- return $ controlStack localContext
     case safeHead controlStack of
         Right controlFrame ->
             if (length operandStack == height controlFrame && unreachable controlFrame) then
@@ -675,11 +682,13 @@ popCheckOpd expect = do
             return actual
 
 
-pushOpd :: ValType -> ValidationState ()
-pushOpd valtype = do
+--TODO: This could be changed to take Maybe Valtype so that
+--  Nothing can be pushed as Unkown. But what happens to our other checks?
+pushOpd :: Maybe ValType -> ValidationState ()
+pushOpd maybeValtype = do
     (context, localContext) <- get
     ops <- return $ operandStack localContext
-    put (context, localContext { operandStack = (Just valtype) : ops })
+    put (context, localContext { operandStack = maybeValtype : ops })
     return ()
 
 
@@ -1078,3 +1087,6 @@ printError error =
         ExitHeightMismatch -> do
             putStrLn "🗙 The operand stack was not returned to its initial height at the end of this func."
             return ()
+
+
+  

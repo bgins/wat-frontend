@@ -211,7 +211,7 @@ result = do
 -- TYPES [§6.4]
 
 
-data FuncType = FuncType Params Results
+data FuncType = FuncType Params Results deriving (Eq)
 
 data GlobalType = GlobalConst ValType
                 | GlobalVar ValType
