@@ -436,18 +436,23 @@ checkInstruction instruction = do
         -- variable instructions [§3.3.3]
         LocalGet idx -> do
             locals <- return $ locals localContext
-            maybeValtype <- return $ lookupByIdX idx locals
-            case maybeValtype of
-                Just vt -> do
-                    pushOpd (Just vt)
-                    return ()
-                Nothing ->
-                    fail $ "🗙 Could not find local" ++ show idx
+            checkLocalGet idx locals
 
-        LocalSet idx  -> return ()
-        LocalTee idx  -> return ()
-        GlobalGet idx -> return ()
-        GlobalSet idx -> return ()
+        LocalSet idx  -> do
+            locals <- return $ locals localContext
+            checkLocalSet idx locals
+
+        LocalTee idx  -> do
+            locals <- return $ locals localContext
+            checkLocalTee idx locals
+
+        GlobalGet idx -> do
+            globals <- return $ globals context
+            checkGlobalGet idx globals
+
+        GlobalSet idx -> do
+            globals <- return $ globals context
+            checkGlobalSet idx globals
 
         -- add memory instructions [§3.3.4]
 
@@ -635,6 +640,76 @@ checkCvtOp vt1 vt2 = do
     popCheckOpd (Just vt1)
     pushOpd (Just vt2)
     return ()
+
+
+
+-- VARIABLE INSTRUCTION CHECKS
+
+
+checkLocalGet :: ParserIdX -> [(MaybeIdent, ValType)] -> ValidationState ()
+checkLocalGet idx locals = do
+    maybeValType <- return $ lookupByIdX idx locals
+    case maybeValType of
+        Just vt -> do
+            pushOpd (Just vt)
+            return ()
+        Nothing ->
+            fail $ "🗙 Could not find local" ++ showIdX idx
+
+
+checkLocalSet :: ParserIdX -> [(MaybeIdent, ValType)] -> ValidationState ()
+checkLocalSet idx locals = do
+    maybeValType <- return $ lookupByIdX idx locals
+    case maybeValType of
+        Just vt -> do
+            popCheckOpd (Just vt)
+            return ()
+        Nothing ->
+            fail $ "🗙 Could not find local" ++ showIdX idx
+
+
+checkLocalTee :: ParserIdX -> [(MaybeIdent, ValType)] -> ValidationState ()
+checkLocalTee idx locals = do
+    maybeValType <- return $ lookupByIdX idx locals
+    case maybeValType of
+        Just vt -> do
+            popCheckOpd (Just vt)
+            pushOpd (Just vt)
+            return ()
+        Nothing ->
+            fail $ "🗙 Could not find local" ++ showIdX idx
+
+
+checkGlobalGet :: ParserIdX -> [(MaybeIdent, GlobalType)] -> ValidationState ()
+checkGlobalGet idx globals = do
+    maybeGlobalType <- return $ lookupByIdX idx globals
+    case maybeGlobalType of
+        Just gt -> do
+            case gt of
+                GlobalConst vt -> do
+                    pushOpd (Just vt)
+                    return ()
+                GlobalVar vt -> do
+                    pushOpd (Just vt)
+                    return ()
+        Nothing ->
+            fail $ "🗙 Could not find global" ++ showIdX idx
+
+
+checkGlobalSet :: ParserIdX -> [(MaybeIdent, GlobalType)] -> ValidationState ()
+checkGlobalSet idx globals = do
+    maybeGlobalType <- return $ lookupByIdX idx globals
+    case maybeGlobalType of
+        Just gt -> do
+            case gt of
+                GlobalConst vt -> do
+                    fail "🗙 Cannot set a constant global"
+                GlobalVar vt -> do
+                    popCheckOpd (Just vt)
+                    return ()
+        Nothing ->
+            fail $ "🗙 Could not find global" ++ showIdX idx
+
 
 
 
