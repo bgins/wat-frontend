@@ -330,13 +330,12 @@ checkFuncs component = do
         Func _ typeuse locals instructions -> do
             printFuncStep component
             checkFunc typeuse locals instructions
-            return ()
         Start idx -> do
             printStep component
             checkStart idx
-        Global maybeId globaltype _ ->
-            -- check function expressions
-            return ()
+        Global maybeId globaltype instructions -> do
+            printGlobalStep component
+            checkGlobal globaltype instructions
         Export name exportdesc -> do
             printStep component
             checkExport name exportdesc
@@ -370,6 +369,24 @@ checkStart idx = do
         put (context { valid = False })
         liftIO $ printError MultipleStart
         return ()
+
+
+checkGlobal :: GlobalType -> Instructions ParserIdX -> ContextState ()
+checkGlobal globaltype instructions = do
+    context <- get
+    result <- return $ lookupGlobalResult globaltype
+    let controlFrame = ControlFrame {labelTypes = [], resultType = result , height = 0, unreachable = False}
+        emptyLocalContext = LocalContext { locals = [], operandStack = [], controlStack = [controlFrame] }
+    (_, (checkedContext, _)) <- lift $ runStateT (checkBlock instructions) (context, emptyLocalContext)
+    put (context { valid = valid checkedContext })
+    return ()
+
+
+lookupGlobalResult :: GlobalType -> ResultType
+lookupGlobalResult globaltype =
+    case globaltype of
+        GlobalConst valtype -> Just (Result valtype)
+        GlobalVar valtype -> Just (Result valtype)
 
 
 checkExport :: Name -> ExportDescription ParserIdX -> ContextState ()
@@ -1084,7 +1101,16 @@ printStep component = do
 printFuncStep :: Component ParserIdX -> ContextState ()
 printFuncStep component = do
     liftIO $ putStrLn "λ••••••••••••••••"
-    liftIO $ putStrLn $ "checking:"
+    liftIO $ putStrLn $ "checking func body:"
+    liftIO $ printTree component
+    liftIO $ putStr "\n"
+    return ()
+
+  
+printGlobalStep :: Component ParserIdX -> ContextState ()
+printGlobalStep component = do
+    liftIO $ putStrLn "🞊••••••••••••••••"
+    liftIO $ putStrLn $ "checking global initializer:"
     liftIO $ printTree component
     liftIO $ putStr "\n"
     return ()

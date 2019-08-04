@@ -299,7 +299,7 @@ typeRef = do
 
 data ModuleName = ModuleName String
 
-data Name = Name String
+data Name = Name String deriving (Eq)
 
 data ImportDescription idx = FuncImport MaybeIdent (TypeUse idx)
                        -- add table, memory, and global imports here
