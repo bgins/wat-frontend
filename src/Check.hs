@@ -30,6 +30,7 @@ data Context = Context
     -- add tables and mems
     , globals :: [(MaybeIdent, GlobalType)]
     , start :: Maybe ParserIdX
+    , exports :: [Name]
     , valid :: Bool
     }
 
@@ -96,7 +97,7 @@ check filepath = do
                         putStrLn "🗙 Invalid module"
                         return ()
                   where
-                       emptyContext = Context { types = [], funcs = [], globals = [], start = Nothing , valid = True }
+                       emptyContext = Context { types = [], funcs = [], globals = [], start = Nothing, exports = [], valid = True }
 
 
 
@@ -336,9 +337,9 @@ checkFuncs component = do
         Global maybeId globaltype _ ->
             -- check function expressions
             return ()
-        Export _ exportdesc -> do
+        Export name exportdesc -> do
             printStep component
-            checkExport exportdesc
+            checkExport name exportdesc
 
 
 checkFunc :: TypeUse ParserIdX -> Locals -> Instructions ParserIdX -> ContextState ()
@@ -371,19 +372,23 @@ checkStart idx = do
         return ()
 
 
--- TODO: make sure export names are unique
-checkExport :: ExportDescription ParserIdX -> ContextState ()
-checkExport exportdesc = do
-    context <- get
-    case exportdesc of
-       FuncExport idx ->
-           case lookupByIdX idx (funcs context) of
-               Just _ ->
-                   return ()
-               Nothing -> do
-                   put (context { valid = False })
-                   liftIO $ printError (MissingType idx)
-                   return ()
+checkExport :: Name -> ExportDescription ParserIdX -> ContextState ()
+checkExport name exportdesc = do
+   context <- get
+   if elem name (exports context) then do
+       put (context { valid = False })
+       liftIO $ printDuplicateExportError name
+   else do
+       put(context { exports = name : exports context })
+       case exportdesc of
+          FuncExport idx ->
+              case lookupByIdX idx (funcs context) of
+                  Just _ ->
+                      return ()
+                  Nothing -> do
+                      put (context { valid = False })
+                      liftIO $ printError (MissingType idx)
+                      return ()
 
 
 
@@ -947,11 +952,12 @@ lookupResult typeuse =
 
 
 instance Show Context where
-    show (Context types funcs globals start valid) = "∙context∙" ++ "\n"
+    show (Context types funcs globals start exports valid) = "∙context∙" ++ "\n"
         ++ indent 1 ++ "types\n" ++ (concat $ map showType types)
         ++ indent 1 ++ "funcs\n" ++ (concat $ map showTypeRef funcs)
         ++ indent 1 ++ "globals\n" ++ (concat $ map showType globals)
         ++ indent 1 ++ "start" ++ showMaybeIdX start ++ "\n"
+        ++ indent 1 ++ "exports\n" ++ (concat $ map showName exports) ++ "\n"
         ++ indent 1 ++ "valid " ++ show valid
         ++ "\n"
 
@@ -1055,6 +1061,12 @@ showInstructionContext localContext =
                 ++ "\n"
 
 
+showName :: Name -> String
+showName name =
+    indent 3 ++ show name ++ "\n"
+
+
+
 -- PRINT
 
 
@@ -1152,6 +1164,11 @@ showError error =
         ExitHeightMismatch ->
             "The operand stack was not returned to its initial height at the end of this func"
 
-
 printImportOrderError :: IO ()
-printImportOrderError = putStrLn $ "🗙 Imports must come before any funcs, tables, memories, or globals in a valid module"
+printImportOrderError =
+    putStrLn $ "🗙 Imports must come before any funcs, tables, memories, or globals in a valid module"
+
+
+printDuplicateExportError :: Name -> IO ()
+printDuplicateExportError name =
+    putStrLn $ "🗙 Export names must be unique and" ++ show name ++ " has already been used"
