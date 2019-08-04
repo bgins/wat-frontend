@@ -38,6 +38,7 @@ data LocalContext = LocalContext
     { locals :: [(MaybeIdent, ValType)]
     , operandStack :: [Maybe ValType] -- Nothing represents Unknown
     , controlStack :: [ControlFrame]
+    -- , controlStack :: [(MaybeIdent, ControlFrame)]
     }
 
 
@@ -79,11 +80,11 @@ check filepath = do
                     putStrLn "① Checking import order..."
                     if checkImportOrder components then do
                         context <- execStateT (makeContext components) emptyContext
-                        if (valid context) then do
+                        if valid context then do
                             putStrLn $ show context
                             putStrLn "④ Checking func bodies, starts and exports..."
                             checkedContext <- execStateT (check_ components) context
-                            if (valid checkedContext) then do
+                            if valid checkedContext then
                                 putStrLn "✓ Module is valid"
                             else
                                 putStrLn "🗙 Invalid module"
@@ -91,7 +92,7 @@ check filepath = do
                             putStrLn "🗙 Invalid module"
                         return ()
                     else do
-                        printError ImportOrder
+                        printImportOrderError
                         putStrLn "🗙 Invalid module"
                         return ()
                   where
@@ -113,9 +114,9 @@ checkImportOrder components =
 importsFirst :: (Bool, Bool) -> Component ParserIdX -> (Bool, Bool)
 importsFirst (inOrder, stillImporting) component =
     case component of
-        Import _ _ _ -> (True && stillImporting, stillImporting)
-        Func _ _ _ _ -> (inOrder, False && stillImporting)
-        Global _ _ _ -> (inOrder, False && stillImporting)
+        Import _ _ _ -> (stillImporting, stillImporting)
+        Func _ _ _ _ -> (inOrder, False)
+        Global _ _ _ -> (inOrder, False)
         -- add tables and mems
         _            -> (inOrder, stillImporting)
 
@@ -131,11 +132,11 @@ importsFirst (inOrder, stillImporting) component =
 -}
 
 
+-- STP: move mapM calls to check function and print there?
 makeContext :: Components ParserIdX -> ContextState ()
 makeContext components = do
     liftIO $ putStrLn "② Adding types to the context..."
     mapM_ registerType components
-    context <- get
     liftIO $ putStrLn "③ Adding imports, funcs, and globals to the context..."
     mapM_ registerComponent components
 
@@ -152,8 +153,7 @@ registerType component = do
 
 
 registerComponent :: Component ParserIdX -> ContextState ()
-registerComponent component = do
-    context <- get
+registerComponent component =
     case component of
         Type maybeId functype ->
             return ()
@@ -166,6 +166,7 @@ registerComponent component = do
         Start _ ->
             return ()
         Global maybeId globaltype _ -> do
+            context <- get
             updatedGlobals <- addContextEntry "global" maybeId globaltype (globals context)
             put (context { globals = updatedGlobals })
         Export _ _ ->
@@ -207,17 +208,13 @@ registerFunc maybeId typeuse = do
                     put (context { funcs = updatedFuncs })
                 Nothing -> do
                     updatedTypes <- addContextEntry "type" Nothing (FuncType params results) (types context)
-                    put (context { types = updatedTypes })
-                    context <- get
-                    -- before we add this as a func, we need the index -- but do we need to
-                    -- check in this way?
-                    maybeIndex <- return $ lookupType (FuncType params results) (types context)
+                    let maybeIndex = lookupType (FuncType params results) updatedTypes
                     case maybeIndex of
                         Just typeIndex -> do
                             updatedFuncs <- addContextEntry "func" maybeId typeIndex (funcs context)
-                            put (context { funcs = updatedFuncs })
+                            put (context { types = updatedTypes, funcs = updatedFuncs })
                         Nothing ->
-                            liftIO $ print "!! I just added that type. This must be a compiler bug."
+                            fail "I just added that type. This must be a compiler bug."
 
 
 
@@ -350,10 +347,10 @@ checkFunc typeuse locals instructions = do
     bodyLocals <- makeBodyLocals typeuse locals
     result <- lookupResult typeuse
     let controlFrame = ControlFrame {labelTypes = [], resultType = result , height = 0, unreachable = False}
-        emptyLocalContext = LocalContext { locals = bodyLocals, operandStack = [], controlStack = [controlFrame] } in do
-        (_, (checkedContext, _)) <- lift $ runStateT (checkBlock instructions) (context, emptyLocalContext)
-        put (context { valid = valid checkedContext })
-        return ()
+        emptyLocalContext = LocalContext { locals = bodyLocals, operandStack = [], controlStack = [controlFrame] }
+    (_, (checkedContext, _)) <- lift $ runStateT (checkBlock instructions) (context, emptyLocalContext)
+    put (context { valid = valid checkedContext })
+    return ()
 
 
 checkStart :: ParserIdX -> ContextState ()
@@ -374,6 +371,7 @@ checkStart idx = do
         return ()
 
 
+-- TODO: make sure export names are unique
 checkExport :: ExportDescription ParserIdX -> ContextState ()
 checkExport exportdesc = do
     context <- get
@@ -647,7 +645,6 @@ popOpd :: ValidationState (Maybe ValType)
 popOpd = do
     (context, localContext) <- get
     operandStack <- return $ operandStack localContext
-    -- controlFrame <- return $ head $ controlStack localContext  -- TODO: head is not safe!
     controlStack <- return $ controlStack localContext
     case safeHead controlStack of
         Right controlFrame ->
@@ -682,8 +679,6 @@ popCheckOpd expect = do
             return actual
 
 
---TODO: This could be changed to take Maybe Valtype so that
---  Nothing can be pushed as Unkown. But what happens to our other checks?
 pushOpd :: Maybe ValType -> ValidationState ()
 pushOpd maybeValtype = do
     (context, localContext) <- get
@@ -1002,7 +997,7 @@ printStep component = do
 printFuncStep :: Component ParserIdX -> ContextState ()
 printFuncStep component = do
     liftIO $ putStrLn "λ••••••••••••••••"
-    liftIO $ putStrLn $ "∙check∙"
+    liftIO $ putStrLn $ "checking:"
     liftIO $ printTree component
     liftIO $ putStr "\n"
     return ()
@@ -1041,7 +1036,7 @@ data Error = MissingType ParserIdX
            | MissingFunc ParserIdX
            | TypeDeclMismatch ParserIdX
            | MultipleStart
-           | ImportOrder 
+           | ImportOrder
            | IdAlreadyDefined Ident String
            | Underflow
            | PopEmptyOps
@@ -1051,42 +1046,37 @@ data Error = MissingType ParserIdX
 
 
 printError :: Error -> IO ()
-printError error =
+printError =
+    putStrLn . ("🗙 " ++) . showError
+
+
+showError :: Error -> String
+showError error =
     case error of
-        MissingType idx -> do
-            putStrLn $ "🗙 A type with the identifier" ++ (showIdX idx) ++ " could not be found\n"
-            return ()
-        MissingFunc idx -> do
-            putStrLn $ "🗙 A func with the identifier" ++ (showIdX idx) ++ " could not be found\n"
-            return ()
-        TypeDeclMismatch idx -> do
-            putStrLn $ "🗙 The inline declarations used in this type use do not match the reference type" ++ (showIdX idx) ++ "\n"
-            return ()
-        MultipleStart -> do
-            putStrLn $ "🗙 A start component has already registered an entry point to this module"
-            return ()
-        ImportOrder -> do
-            putStrLn $ "🗙 Imports must come before any funcs, tables, memories, or globals in a valid module"
-            return ()
-        IdAlreadyDefined id indexSpaceName -> do
-            putStrLn $ "The identifier " ++ show id
-                ++ " already defined in " ++ indexSpaceName ++ " index space."
-            return ()
-        Underflow -> do
-            putStrLn "🗙 Pop operation undeflows the current block"
-            return ()
-        PopEmptyOps -> do
-            putStrLn "🗙 Cannot pop an empty operand stack."
-            return ()
-        PopEmptyFrames -> do
-            putStrLn "🗙 Attempt to pop a control frame but there are none."
-            return ()
-        OperandMismatch -> do
-            putStrLn "🗙 Actual operand does not match expected operand."
-            return ()
-        ExitHeightMismatch -> do
-            putStrLn "🗙 The operand stack was not returned to its initial height at the end of this func."
-            return ()
+        MissingType idx ->
+            "A type with the identifier" ++ (showIdX idx) ++ " could not be found\n"
+        MissingFunc idx ->
+            "A func with the identifier" ++ (showIdX idx) ++ " could not be found\n"
+        TypeDeclMismatch idx ->
+            "The inline declarations used in this type use do not match the reference type" ++ (showIdX idx) ++ "\n"
+        MultipleStart ->
+            "A start component has already registered an entry point to this module"
+        ImportOrder ->
+            "Imports must come before any funcs, tables, memories, or globals in a valid module"
+        IdAlreadyDefined id indexSpaceName ->
+            "The identifier " ++ show id
+                ++ " already defined in " ++ indexSpaceName ++ " index space"
+        Underflow ->
+            "Pop operation undeflows the current block"
+        PopEmptyOps ->
+            "Cannot pop an empty operand stack"
+        PopEmptyFrames ->
+            "Attempt to pop a control frame but there are none"
+        OperandMismatch ->
+            "Actual operand does not match expected operand"
+        ExitHeightMismatch ->
+            "The operand stack was not returned to its initial height at the end of this func"
 
 
-  
+printImportOrderError :: IO ()
+printImportOrderError = putStrLn $ "🗙 Imports must come before any funcs, tables, memories, or globals in a valid module"
