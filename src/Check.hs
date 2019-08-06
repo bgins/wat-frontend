@@ -80,7 +80,10 @@ check filepath = do
                 Module maybeId components -> do
                     putStrLn "① Checking import order..."
                     if checkImportOrder components then do
-                        context <- execStateT (makeContext components) emptyContext
+                        liftIO $ putStrLn "② Adding types to the context..."
+                        typedContext <- execStateT (registerTypes components) emptyContext
+                        liftIO $ putStrLn "③ Adding imports, funcs, and globals to the context..."
+                        context <- execStateT (registerComponents components) typedContext
                         if valid context then do
                             putStrLn $ show context
                             putStrLn "④ Checking func bodies, starts and exports..."
@@ -123,23 +126,20 @@ importsFirst (inOrder, stillImporting) component =
 
 
 
--- CONTEXT PREPASS
+-- CONTEXT PREPASSES
 
 {-| Build the global context
 
-  The first pass collects types.
-  The second pass collects imports, funcs, globals, and exports. Any InlineTypes that
-  do not exist by some other name in the context are added in this pass.
+  The registerTypes pass collects types.
+  The registerComponents pass collects imports, funcs, globals, and exports. Any
+  InlineTypes that do not exist by some other name in the types context are added in
+  this pass.
 -}
 
 
--- STP: move mapM calls to check function and print there?
-makeContext :: Components ParserIdX -> ContextState ()
-makeContext components = do
-    liftIO $ putStrLn "② Adding types to the context..."
+registerTypes :: Components ParserIdX -> ContextState ()
+registerTypes components =
     mapM_ registerType components
-    liftIO $ putStrLn "③ Adding imports, funcs, and globals to the context..."
-    mapM_ registerComponent components
 
 
 registerType :: Component ParserIdX -> ContextState ()
@@ -151,6 +151,11 @@ registerType component = do
              updatedTypes <- addContextEntry "type" maybeId functype (types context)
              put (context { types = updatedTypes })
          _ -> return ()
+
+
+registerComponents :: Components ParserIdX -> ContextState ()
+registerComponents components =
+     mapM_ registerComponent components
 
 
 registerComponent :: Component ParserIdX -> ContextState ()
