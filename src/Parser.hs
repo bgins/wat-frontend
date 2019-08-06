@@ -302,6 +302,7 @@ data ModuleName = ModuleName String
 data Name = Name String deriving (Eq)
 
 data ImportDescription idx = FuncImport MaybeIdent (TypeUse idx)
+                           | GlobalImport MaybeIdent GlobalType
                        -- add table, memory, and global imports here
 
 parseImport :: Parser (Component ParserIdX)
@@ -320,6 +321,10 @@ importdesc = do
             maybeId <- leftPad $ maybeIdent
             typeuse <- leftPad $ typeUse
             return (FuncImport maybeId typeuse)
+        Keyword "global" -> do
+            maybeId <- leftPad $ maybeIdent
+            globaltype <- wrapSpace $ globalType
+            return (GlobalImport maybeId globaltype)
         _         -> Parsec.unexpected "Expected a Keyword token"
 
 
@@ -794,7 +799,9 @@ parseGlobal = do
 
 
 data ExportDescription idx = FuncExport idx
-                       -- add table, memory, and global exports here
+                           -- add table and memory here
+                           | GlobalExport idx
+
 
 parseExport :: Parser (Component ParserIdX)
 parseExport = do
@@ -810,6 +817,9 @@ exportdesc = do
         Keyword "func" -> do
             funcidx <- leftPad $ parserIdX
             return (FuncExport funcidx)
+        Keyword "global" -> do
+            globalidx <- leftPad $ parserIdX
+            return (GlobalExport globalidx)
         _         -> Parsec.unexpected "Expected a Keyword token"
 
 
@@ -917,6 +927,8 @@ instance ToTree (TypeUse ParserIdX) where
 instance ToTree (ImportDescription ParserIdX) where
     toTree (FuncImport maybeId typeuse) =
         Node ("func" ++ showMaybeId maybeId) $ [toTree typeuse]
+    toTree (GlobalImport maybeId globaltype) =
+        Node ("global" ++ showMaybeId maybeId) $ [toTree globaltype]
 
 instance ToTree Local where
     toTree (Local maybeId valtype) =
@@ -1088,6 +1100,8 @@ instance ToTree (Instruction ParserIdX) where
 instance ToTree (ExportDescription ParserIdX) where
     toTree (FuncExport funcidx) =
         leaf $ "func" ++ showIdX funcidx
+    toTree (GlobalExport globalidx) =
+        leaf $ "global" ++ showIdX globalidx
 
 instance ToTree (Module ParserIdX) where
     toTree (Module maybeId components) =

@@ -180,7 +180,10 @@ registerImport importdesc = do
     case importdesc of
         FuncImport maybeId typeuse ->
             registerFunc maybeId typeuse
-        -- add table, memory, and global imports here
+        -- add tables and mems here
+        GlobalImport maybeId globaltype -> do
+            updatedGlobals <- addContextEntry "global" maybeId globaltype (globals context)
+            put (context { globals = updatedGlobals })
 
 
 registerFunc :: MaybeIdent -> TypeUse ParserIdX -> ContextState ()
@@ -399,14 +402,21 @@ checkExport name exportdesc = do
        put(context { exports = name : exports context })
        case exportdesc of
           FuncExport idx ->
-              case lookupByIdX idx (funcs context) of
-                  Just _ ->
-                      return ()
-                  Nothing -> do
-                      put (context { valid = False })
-                      liftIO $ printError (MissingType idx)
-                      return ()
+              lookupExport idx (funcs context)
+          GlobalExport idx ->
+              lookupExport idx (globals context)
 
+
+lookupExport :: ParserIdX -> [(MaybeIdent, a)] -> ContextState ()
+lookupExport idx contextSpace = 
+    case lookupByIdX idx contextSpace of
+        Just _ ->
+            return ()
+        Nothing -> do
+            context <- get
+            put (context { valid = False })
+            liftIO $ printError (MissingType idx)
+            return ()
 
 
 -- CHECK FUNC BODY

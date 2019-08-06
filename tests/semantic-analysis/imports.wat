@@ -12,4 +12,8 @@
   ;; test InlineType
   (import "env" "or" (func $or (param i32) (param i32) (result i32)))
   (import "env" "xor" (func $xor (param $lhs i32) (param $rhs i32) (result i32)))
+
+  ;; test globals
+  (import "extern" "constVal" (global $constVal i32))
+  (import "extern" "mutVal" (global $mutVal (mut i32)))
   )  
