@@ -37,29 +37,28 @@ data Context = Context
 
 data LocalContext = LocalContext
     { locals :: [(MaybeIdent, ValType)]
-    , operandStack :: [Maybe ValType] -- Nothing represents Unknown
+    , operandStack :: [CheckValType]
     , controlStack :: [ControlFrame]
-    -- , controlStack :: [(MaybeIdent, ControlFrame)]
     }
 
 
 data ControlFrame = ControlFrame
-   { labelTypes :: [ValType]  -- [ResultType] ??
-   , resultType :: ResultType
+   { labelTypes :: [CheckValType]
+   , resultTypes :: [CheckValType]
    , height :: Int
    , unreachable :: Bool
    }
 
-  -- it seems like we should track labels but we don't?
-  -- , labels :: [(MaybeIdent, ResultType)]
-  -- , return_ :: (MaybeIdent, ResultType)   -- Maybe return_?
-
 type Types = [(MaybeIdent, FuncType)]
-
-type TypeIndex = Word32
 
 type Funcs = [(MaybeIdent, TypeIndex)]
 
+type TypeIndex = Word32
+
+{- While checking we may have a ValType or Unknown on a polymorphic stack.
+   A Option type is used where Just wraps a ValType and Nothing is Unknown.
+-}
+type CheckValType = Maybe ValType
 
 type ContextState = StateT Context IO
 
@@ -353,8 +352,8 @@ checkFunc :: TypeUse ParserIdX -> Locals -> Instructions ParserIdX -> ContextSta
 checkFunc typeuse locals instructions = do
     context <- get
     bodyLocals <- makeBodyLocals typeuse locals
-    result <- lookupResult typeuse
-    let controlFrame = ControlFrame {labelTypes = [], resultType = result , height = 0, unreachable = False}
+    results <- lookupResults typeuse
+    let controlFrame = ControlFrame {labelTypes = results, resultTypes = results , height = 0, unreachable = False}
         emptyLocalContext = LocalContext { locals = bodyLocals, operandStack = [], controlStack = [controlFrame] }
     (_, (checkedContext, _)) <- lift $ runStateT (checkBlock instructions) (context, emptyLocalContext)
     put (context { valid = valid checkedContext })
@@ -382,19 +381,21 @@ checkStart idx = do
 checkGlobal :: GlobalType -> Instructions ParserIdX -> ContextState ()
 checkGlobal globaltype instructions = do
     context <- get
-    result <- return $ lookupGlobalResult globaltype
-    let controlFrame = ControlFrame {labelTypes = [], resultType = result , height = 0, unreachable = False}
+    results <- return $ lookupGlobalResult globaltype
+    let controlFrame = ControlFrame {labelTypes = results, resultTypes = results , height = 0, unreachable = False}
         emptyLocalContext = LocalContext { locals = [], operandStack = [], controlStack = [controlFrame] }
     (_, (checkedContext, _)) <- lift $ runStateT (checkBlock instructions) (context, emptyLocalContext)
     put (context { valid = valid checkedContext })
     return ()
 
 
-lookupGlobalResult :: GlobalType -> ResultType
+lookupGlobalResult :: GlobalType -> [CheckValType]
 lookupGlobalResult globaltype =
     case globaltype of
-        GlobalConst valtype -> Just (Result valtype)
-        GlobalVar valtype -> Just (Result valtype)
+        GlobalConst valtype -> 
+            [Just valtype]
+        GlobalVar valtype ->
+            [Just valtype]
 
 
 checkExport :: Name -> ExportDescription ParserIdX -> ContextState ()
@@ -753,7 +754,7 @@ checkGlobalSet idx globals = do
 -- OPERAND AND CONTROL STACK MANIPULATION
 
 
-popOpd :: ValidationState (Maybe ValType)
+popOpd :: ValidationState (CheckValType)
 popOpd = do
     (context, localContext) <- get
     operandStack <- return $ operandStack localContext
@@ -776,7 +777,7 @@ popOpd = do
         Left err ->
             fail err
 
-popCheckOpd :: Maybe ValType ->  ValidationState (Maybe ValType)
+popCheckOpd :: CheckValType ->  ValidationState (CheckValType)
 popCheckOpd expect = do
     actual <- popOpd
     if (actual == Nothing) then
@@ -791,7 +792,7 @@ popCheckOpd expect = do
             return actual
 
 
-pushOpd :: Maybe ValType -> ValidationState ()
+pushOpd :: CheckValType -> ValidationState ()
 pushOpd maybeValtype = do
     (context, localContext) <- get
     ops <- return $ operandStack localContext
@@ -799,14 +800,19 @@ pushOpd maybeValtype = do
     return ()
 
 
-popControlFrame :: ValidationState (Maybe ValType)
+popCheckOpds :: [CheckValType] -> ValidationState ()
+popCheckOpds opds =
+    mapM_ popCheckOpd opds
+
+
+popControlFrame :: ValidationState [CheckValType]
 popControlFrame = do
     (context, localContext) <- get
     controlStack <- return $ controlStack localContext
     case (listToMaybe controlStack) of
         Just frame -> do
-            maybeValtype <- return $ resultTypeToMaybe $ resultType frame
-            result <- maybePopStack maybeValtype
+            expectedResults <- return $ resultTypes frame
+            popCheckOpds expectedResults
             (_, localContext) <- get
             operandStack <- return $ operandStack localContext
             if ((length operandStack) /= (height frame)) then do
@@ -816,9 +822,7 @@ popControlFrame = do
                 case safeTail controlStack of
                     Right newStack -> do
                         put (context, localContext { controlStack = newStack })
-                        return result
-                        -- algorithm suggests returning this, but why did we check?
-                        -- return (resultType frame)
+                        return (resultTypes frame)
                     Left err       ->
                         fail err
         Nothing -> do
@@ -826,22 +830,12 @@ popControlFrame = do
             fail ""
 
 
-maybePopStack :: Maybe ValType -> ValidationState (Maybe ValType)
-maybePopStack maybeResult =
-    case maybeResult of
-       Just valtype -> do
-           result <- popCheckOpd (Just valtype)
-           return (Just valtype)
-       Nothing ->
-           return Nothing
-
-
-pushControlFrame :: [ValType] -> ResultType -> ValidationState ()
-pushControlFrame labels result = do
+pushControlFrame :: [CheckValType] -> [CheckValType] -> ValidationState ()
+pushControlFrame labels results = do
     (context, localContext) <- get
     frames <- return $ controlStack localContext
-    ops <- return $ operandStack localContext
-    let frame = ControlFrame { labelTypes = labels, resultType = result, height = length ops, unreachable = False } in do
+    opds <- return $ operandStack localContext
+    let frame = ControlFrame { labelTypes = labels, resultTypes = results, height = length opds, unreachable = False } in do
         put (context, localContext { controlStack = frame : frames})
         return ()
 
@@ -858,16 +852,6 @@ safeTail as =
     case as of
         a:as -> Right as
         []   -> Left "🗙 Cannot delete the top of an empty stack"
-
-
-resultTypeToMaybe :: ResultType -> Maybe ValType
-resultTypeToMaybe resultType =
-    case resultType of
-        Just result ->
-            case result of
-                Result valtype -> Just valtype
-        Nothing -> Nothing
-
 
 
 
@@ -960,8 +944,8 @@ lookupParams typeuse =
             return (Just params)
 
 
-lookupResult :: TypeUse ParserIdX -> ContextState ResultType
-lookupResult typeuse =
+lookupResults :: TypeUse ParserIdX -> ContextState [CheckValType]
+lookupResults typeuse =
     case typeuse of
         TypeUse idx -> do
             context <- get
@@ -970,14 +954,20 @@ lookupResult typeuse =
                 Just functype ->
                     case functype of
                         FuncType _ results ->
-                            return (listToMaybe results)
+                            return $ map resultToCheckValType results
                 Nothing -> do
                     liftIO $ printError (MissingType idx)
-                    return Nothing
+                    return []
         TypeUseWithDeclarations idx params results ->
-            return (listToMaybe results)
+            return $ map resultToCheckValType results
         InlineType params results ->
-            return (listToMaybe results)
+            return $ map resultToCheckValType results
+
+
+resultToCheckValType :: Result -> CheckValType
+resultToCheckValType (Result valtype) =
+    Just valtype
+
 
 
 -- SHOW
@@ -997,14 +987,14 @@ instance Show LocalContext where
     show (LocalContext locals operandStack controlStack) = "∙local context∙" ++ "\n"
         ++ indent 1 ++ "locals\n" ++ (concat $ map showType locals)
         ++ indent 1 ++ "operand stack\n"
-        ++ indent 3 ++ "[" ++ (concat $ map showMaybeValtype operandStack) ++ " ]" ++ "\n"
+        ++ indent 3 ++ "[" ++ (concat $ map showCheckValType operandStack) ++ " ]" ++ "\n"
         ++ indent 1 ++ "control stack\n" ++ (concat $ map showControlFrame $ zip [0..] controlStack)
         -- ++ "\n"
 
 instance Show ControlFrame where
-    show (ControlFrame labelTypes resultType height unreachable) =
+    show (ControlFrame labelTypes resultTypes height unreachable) =
         "label types [" ++ (concat $ map show labelTypes) ++ " ]\n"
-            ++ indent 5 ++ "result type" ++ (showResultType resultType) ++ "\n"
+            ++ indent 5 ++ "result types [" ++ (concat $ map showResultType resultTypes) ++ " ]\n"
             ++ indent 5 ++ "entry height " ++ show height ++ "\n"
             ++ indent 5 ++ "unreachable " ++ show unreachable
             ++ "\n"
@@ -1064,17 +1054,17 @@ showMaybeIdX maybeIdX =
         Nothing -> ""
 
 
-showMaybeValtype :: Maybe ValType -> String
-showMaybeValtype maybeValtype =
+showCheckValType :: CheckValType -> String
+showCheckValType maybeValtype =
     case maybeValtype of
         Just valtype -> show valtype
         Nothing -> " Unknown"
 
 
-showResultType :: ResultType -> String
-showResultType resulttype =
-    case resulttype of
-        Just result -> show result
+showResultType :: CheckValType -> String
+showResultType maybeValtype =
+    case maybeValtype of
+        Just valtype -> show valtype
         Nothing -> " ()"
 
 
@@ -1089,7 +1079,7 @@ showInstructionContext localContext =
         LocalContext locals operandStack _ ->
             indent 1 ++ "locals\n" ++ (concat $ map showType locals)
                 ++ indent 1 ++ "operand stack\n"
-                ++ indent 3 ++ "[" ++ (concat $ map showMaybeValtype operandStack) ++ " ]"
+                ++ indent 3 ++ "[" ++ (concat $ map showCheckValType operandStack) ++ " ]"
                 ++ "\n"
 
 
@@ -1193,7 +1183,7 @@ showError error =
             "Imports must come before any funcs, tables, memories, or globals in a valid module"
         IdAlreadyDefined id indexSpaceName ->
             "The identifier " ++ show id
-                ++ " already defined in " ++ indexSpaceName ++ " index space"
+                ++ " already defined in the " ++ indexSpaceName ++ " index space"
         Underflow ->
             "Pop operation undeflows the current block"
         PopEmptyOps ->
