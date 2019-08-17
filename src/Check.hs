@@ -428,14 +428,14 @@ lookupExport idx contextSpace =
 -- CHECK FUNC BODY
 
 
-checkBlock :: Instructions ParserIdX -> ValidationState ()
+checkBlock :: Instructions ParserIdX -> ValidationState [CheckValType]
 checkBlock instructions = do
     printLocalContext
     mapM_ checkInstructionStep instructions
     results <- popControlFrame
     pushOpds results
     printLocalContext
-    return ()
+    return results
 
 
 checkInstructionStep :: Instruction ParserIdX -> ValidationState ()
@@ -446,15 +446,31 @@ checkInstructionStep instruction = do
 
 checkInstruction :: Instruction ParserIdX -> ValidationState ()
 checkInstruction instruction = do
+    printBlockStep instruction
     (context, localContext) <- get
     case instruction of
         -- control instructions [§3.3.5]
         Block maybeIdent resultType instructions              -> do
-            printBlockStep (Block maybeIdent resultType instructions)
             pushControlFrame (toLabelTypes resultType) (toLabelTypes resultType)
             checkBlock instructions
-        Loop maybeIdent resultType instructions               -> return ()
-        Conditional maybeIdent resultType ifInstrs elseInstrs -> return ()
+            return ()
+        Loop maybeIdent resultType instructions               -> do
+            pushControlFrame [] (toLabelTypes resultType)
+            checkBlock instructions
+            return ()
+        Conditional maybeIdent resultType ifInstructions elseInstructions -> do
+            popCheckOpd (Just I32)
+            pushControlFrame (toLabelTypes resultType) (toLabelTypes resultType)
+            results <- checkBlock ifInstructions
+            if not $ null elseInstructions then do
+              -- clear results and check else arm
+              printElseStep instruction
+              popCheckOpds results
+              pushControlFrame results results 
+              checkBlock elseInstructions
+              return ()
+            else
+              return ()
         Unreachable                                           -> return ()
         Nop                                                   -> return ()
         Br idx                                                -> return ()
@@ -1118,7 +1134,6 @@ printStep component = do
     liftIO $ putStrLn "∙component∙"
     liftIO $ printTree component
     liftIO $ putStr "\n"
-    return ()
 
 
 printFuncStep :: Component ParserIdX -> ContextState ()
@@ -1127,7 +1142,6 @@ printFuncStep component = do
     liftIO $ putStrLn $ "checking func body:"
     liftIO $ printTree component
     liftIO $ putStr "\n"
-    return ()
 
   
 printGlobalStep :: Component ParserIdX -> ContextState ()
@@ -1136,17 +1150,6 @@ printGlobalStep component = do
     liftIO $ putStrLn $ "checking global initializer:"
     liftIO $ printTree component
     liftIO $ putStr "\n"
-    return ()
-
-
-
-printBlockStep :: Instruction ParserIdX -> ValidationState ()
-printBlockStep instruction = do
-    printBlockMark '🞔'
-    liftIO $ putStrLn $ "checking block:"
-    liftIO $ printTree instruction
-    liftIO $ putStr "\n"
-    return ()
 
 
 printLocalContext :: ValidationState ()
@@ -1154,7 +1157,36 @@ printLocalContext = do
     printBlockMark '🞎'
     (_, localContext) <- get
     liftIO $ putStrLn $ show localContext ++ "\n"
-    return ()
+
+
+printBlockStep :: Instruction ParserIdX -> ValidationState ()
+printBlockStep instruction = do
+    case instruction of
+        Block _ _ _          -> do
+            printBlockMark '🞔'
+            liftIO $ putStrLn $ "checking block:"
+            liftIO $ printTree instruction
+            liftIO $ putStr "\n"
+        Loop _ _ _           -> do
+            printBlockMark '🞔'
+            liftIO $ putStrLn $ "checking loop:"
+            liftIO $ printTree instruction
+            liftIO $ putStr "\n"
+        Conditional _ _ _ _  -> do
+            printBlockMark '🞔'
+            liftIO $ putStrLn $ "checking conditional:"
+            liftIO $ printTree instruction
+            liftIO $ putStr "\n"
+        _                    ->
+            return ()
+ 
+
+printElseStep :: Instruction ParserIdX -> ValidationState ()
+printElseStep instruction = do
+    printBlockMark '🞔'
+    liftIO $ putStrLn $ "checking else arm:"
+    liftIO $ printTree instruction
+    liftIO $ putStr "\n"
 
 
 printInstructionStep :: Instruction ParserIdX -> ValidationState ()
@@ -1168,7 +1200,6 @@ printInstructionStep instruction =
             liftIO $ printTree instruction
             (_, localContext) <- get
             liftIO $ putStrLn $ "\n" ++ showInstructionContext localContext ++ "\n"
-            return ()
 
 
 printBlockMark :: Char -> ValidationState ()
@@ -1225,7 +1256,7 @@ showError error =
         OperandMismatch ->
             "Actual operand does not match expected operand"
         ExitHeightMismatch ->
-            "The operand stack was not returned to its initial height at the end of this func"
+            "The operand stack was not returned to its initial height at the end of this block"
 
 printImportOrderError :: IO ()
 printImportOrderError =

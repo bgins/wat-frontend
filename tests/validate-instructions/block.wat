@@ -16,7 +16,7 @@
     end
     drop
 
-    ;; test nested const leaves result
+    ;; test nested block leaves result
     block $nestedConst (result i32)
       block (result i32)
         i32.const 1

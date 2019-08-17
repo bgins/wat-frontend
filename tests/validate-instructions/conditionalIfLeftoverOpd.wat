@@ -1,8 +1,10 @@
 (module
   (func
     ;; leftover operand not expected
-    block $leftover
+    i32.const 1
+    if $ifConst
       i32.const 2
-    end
+    end 
+    drop
   )
 )
