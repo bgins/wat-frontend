@@ -430,10 +430,11 @@ lookupExport idx contextSpace =
 
 checkBlock :: Instructions ParserIdX -> ValidationState ()
 checkBlock instructions = do
-    printBlockEntry
+    printLocalContext
     mapM_ checkInstructionStep instructions
-    popControlFrame
-    printBlockExit
+    results <- popControlFrame
+    pushOpds results
+    printLocalContext
     return ()
 
 
@@ -448,7 +449,10 @@ checkInstruction instruction = do
     (context, localContext) <- get
     case instruction of
         -- control instructions [§3.3.5]
-        Block maybeIdent resultType instructions              -> return ()
+        Block maybeIdent resultType instructions              -> do
+            printBlockStep (Block maybeIdent resultType instructions)
+            pushControlFrame (toLabelTypes resultType) (toLabelTypes resultType)
+            checkBlock instructions
         Loop maybeIdent resultType instructions               -> return ()
         Conditional maybeIdent resultType ifInstrs elseInstrs -> return ()
         Unreachable                                           -> return ()
@@ -633,6 +637,15 @@ checkInstruction instruction = do
         F64ReinterpretI64      -> checkCvtOp I64 F64
 
 
+toLabelTypes :: ResultType -> [CheckValType]
+toLabelTypes resultType =
+    case resultType of
+        Just (Result valtype) ->
+            [Just valtype]
+        Nothing ->
+            []
+
+
 
 -- NUMERIC INSTRUCTION CHECKS
 
@@ -793,11 +806,16 @@ popCheckOpd expect = do
 
 
 pushOpd :: CheckValType -> ValidationState ()
-pushOpd maybeValtype = do
+pushOpd checkValtype = do
     (context, localContext) <- get
     ops <- return $ operandStack localContext
-    put (context, localContext { operandStack = maybeValtype : ops })
+    put (context, localContext { operandStack = checkValtype : ops })
     return ()
+
+
+pushOpds :: [CheckValType] -> ValidationState ()
+pushOpds opds =
+    mapM_ pushOpd opds
 
 
 popCheckOpds :: [CheckValType] -> ValidationState ()
@@ -993,7 +1011,7 @@ instance Show LocalContext where
 
 instance Show ControlFrame where
     show (ControlFrame labelTypes resultTypes height unreachable) =
-        "label types [" ++ (concat $ map show labelTypes) ++ " ]\n"
+        "label types [" ++ (concat $ map showCheckValType labelTypes) ++ " ]\n"
             ++ indent 5 ++ "result types [" ++ (concat $ map showResultType resultTypes) ++ " ]\n"
             ++ indent 5 ++ "entry height " ++ show height ++ "\n"
             ++ indent 5 ++ "unreachable " ++ show unreachable
@@ -1096,7 +1114,7 @@ printStep :: Component ParserIdX -> ContextState ()
 printStep component = do
     context <- get
     liftIO $ putStrLn $ show context
-    liftIO $ putStrLn "🞅∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙🞅"
+    liftIO $ putStrLn "🞅∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙"
     liftIO $ putStrLn "∙component∙"
     liftIO $ printTree component
     liftIO $ putStr "\n"
@@ -1121,29 +1139,43 @@ printGlobalStep component = do
     return ()
 
 
-printBlockEntry :: ValidationState ()
-printBlockEntry = do
-    (_, localContext) <- get
-    liftIO $ putStrLn "🞎∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙"
-    liftIO $ putStrLn $ show localContext ++ "\n"
+
+printBlockStep :: Instruction ParserIdX -> ValidationState ()
+printBlockStep instruction = do
+    printBlockMark '🞔'
+    liftIO $ putStrLn $ "checking block:"
+    liftIO $ printTree instruction
+    liftIO $ putStr "\n"
     return ()
 
 
-printBlockExit :: ValidationState ()
-printBlockExit = do
+printLocalContext :: ValidationState ()
+printLocalContext = do
+    printBlockMark '🞎'
     (_, localContext) <- get
-    liftIO $ putStrLn "∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙🞎"
     liftIO $ putStrLn $ show localContext ++ "\n"
     return ()
 
 
 printInstructionStep :: Instruction ParserIdX -> ValidationState ()
-printInstructionStep instruction = do
+printInstructionStep instruction =
+    case instruction of
+        Block _ _ _          -> return ()
+        Loop _ _ _           -> return ()
+        Conditional _ _ _ _  -> return ()
+        _                    -> do
+            printBlockMark '⬚'
+            liftIO $ printTree instruction
+            (_, localContext) <- get
+            liftIO $ putStrLn $ "\n" ++ showInstructionContext localContext ++ "\n"
+            return ()
+
+
+printBlockMark :: Char -> ValidationState ()
+printBlockMark blockChar = do
     (_, localContext) <- get
-    liftIO $ putStrLn "⬚∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙"
-    liftIO $ printTree instruction
-    liftIO $ putStrLn $ "\n" ++ showInstructionContext localContext ++ "\n"
-    return ()
+    depth <- return $ length $ controlStack localContext
+    liftIO $ putStrLn $ (replicate depth '∙') ++ [blockChar] ++ (replicate (16 - depth) '∙')
 
 
 
