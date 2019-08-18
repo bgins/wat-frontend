@@ -477,7 +477,15 @@ checkInstruction instruction = do
         BrIf idx                                              -> return ()
         BrTable idxs idx                                      -> return ()
         Return                                                -> return ()
-        Call idx                                              -> return ()
+        Call idx                                              -> do
+            functype <- lookupFunc idx
+            case functype of
+                Just (FuncType params results) -> do
+                    popCheckOpds $ map paramToCheckValType params
+                    pushOpds $ map resultToCheckValType results
+                Nothing -> do
+                    liftIO $ printError (FuncNotDefined idx)
+                    fail ""
         CallIndirect typeuse                                  -> return ()
 
         -- parametric instructions [§3.3.2]
@@ -661,6 +669,15 @@ toLabelTypes resultType =
         Nothing ->
             []
 
+
+paramToCheckValType :: Param -> CheckValType
+paramToCheckValType (Param _ vt) =
+    Just vt
+
+
+resultToCheckType :: Result -> CheckValType
+resultToCheckType (Result vt) =
+    Just vt
 
 
 -- NUMERIC INSTRUCTION CHECKS
@@ -1003,6 +1020,19 @@ resultToCheckValType (Result valtype) =
     Just valtype
 
 
+lookupFunc :: ParserIdX -> ValidationState (Maybe FuncType)
+lookupFunc idx = do
+    (context, _) <- get
+    case lookupByIdX idx (funcs context) of
+        Just typeIndex ->
+            case lookupByIndex typeIndex (types context) of
+                Just functype -> do
+                    return (Just functype)
+                Nothing ->
+                    fail "type for func not found"
+        Nothing                        ->
+            return Nothing
+
 
 -- SHOW
 
@@ -1224,6 +1254,7 @@ data Error = MissingType ParserIdX
            | PopEmptyFrames
            | OperandMismatch
            | ExitHeightMismatch
+           | FuncNotDefined ParserIdX
 
 
 printError :: Error -> IO ()
@@ -1257,6 +1288,8 @@ showError error =
             "Actual operand does not match expected operand"
         ExitHeightMismatch ->
             "The operand stack was not returned to its initial height at the end of this block"
+        FuncNotDefined idx ->
+            "The func" ++ showIdX idx ++ " is not defined"
 
 printImportOrderError :: IO ()
 printImportOrderError =
