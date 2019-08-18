@@ -43,7 +43,8 @@ data LocalContext = LocalContext
 
 
 data ControlFrame = ControlFrame
-   { labelTypes :: [CheckValType]
+   { label :: MaybeIdent
+   , labelTypes :: [CheckValType]
    , resultTypes :: [CheckValType]
    , height :: Int
    , unreachable :: Bool
@@ -334,26 +335,26 @@ checkFuncs component = do
             return ()
         Import _ _ _ ->
             return ()
-        Func _ typeuse locals instructions -> do
+        Func maybeIdent typeuse locals instructions -> do
             printFuncStep component
-            checkFunc typeuse locals instructions
+            checkFunc maybeIdent typeuse locals instructions
         Start idx -> do
             printStep component
             checkStart idx
-        Global maybeId globaltype instructions -> do
+        Global maybeIdent globaltype instructions -> do
             printGlobalStep component
-            checkGlobal globaltype instructions
+            checkGlobal maybeIdent globaltype instructions
         Export name exportdesc -> do
             printStep component
             checkExport name exportdesc
 
 
-checkFunc :: TypeUse ParserIdX -> Locals -> Instructions ParserIdX -> ContextState ()
-checkFunc typeuse locals instructions = do
+checkFunc :: MaybeIdent -> TypeUse ParserIdX -> Locals -> Instructions ParserIdX -> ContextState ()
+checkFunc maybeIdent typeuse locals instructions = do
     context <- get
     bodyLocals <- makeBodyLocals typeuse locals
     results <- lookupResults typeuse
-    let controlFrame = ControlFrame {labelTypes = results, resultTypes = results , height = 0, unreachable = False}
+    let controlFrame = ControlFrame {label = maybeIdent, labelTypes = results, resultTypes = results , height = 0, unreachable = False}
         emptyLocalContext = LocalContext { locals = bodyLocals, operandStack = [], controlStack = [controlFrame] }
     (_, (checkedContext, _)) <- lift $ runStateT (checkBlock instructions) (context, emptyLocalContext)
     put (context { valid = valid checkedContext })
@@ -378,11 +379,11 @@ checkStart idx = do
         return ()
 
 
-checkGlobal :: GlobalType -> Instructions ParserIdX -> ContextState ()
-checkGlobal globaltype instructions = do
+checkGlobal :: MaybeIdent -> GlobalType -> Instructions ParserIdX -> ContextState ()
+checkGlobal maybeIdent globaltype instructions = do
     context <- get
     results <- return $ lookupGlobalResult globaltype
-    let controlFrame = ControlFrame {labelTypes = results, resultTypes = results , height = 0, unreachable = False}
+    let controlFrame = ControlFrame {label = maybeIdent, labelTypes = results, resultTypes = results , height = 0, unreachable = False}
         emptyLocalContext = LocalContext { locals = [], operandStack = [], controlStack = [controlFrame] }
     (_, (checkedContext, _)) <- lift $ runStateT (checkBlock instructions) (context, emptyLocalContext)
     put (context { valid = valid checkedContext })
@@ -451,22 +452,22 @@ checkInstruction instruction = do
     case instruction of
         -- control instructions [§3.3.5]
         Block maybeIdent resultType instructions              -> do
-            pushControlFrame (toLabelTypes resultType) (toLabelTypes resultType)
+            pushControlFrame maybeIdent (toLabelTypes resultType) (toLabelTypes resultType)
             checkBlock instructions
             return ()
         Loop maybeIdent resultType instructions               -> do
-            pushControlFrame [] (toLabelTypes resultType)
+            pushControlFrame maybeIdent [] (toLabelTypes resultType)
             checkBlock instructions
             return ()
         Conditional maybeIdent resultType ifInstructions elseInstructions -> do
             popCheckOpd (Just I32)
-            pushControlFrame (toLabelTypes resultType) (toLabelTypes resultType)
+            pushControlFrame maybeIdent (toLabelTypes resultType) (toLabelTypes resultType)
             results <- checkBlock ifInstructions
             if not $ null elseInstructions then do
               -- clear results and check else arm
               printElseStep instruction
               popCheckOpds results
-              pushControlFrame results results 
+              pushControlFrame maybeIdent results results
               checkBlock elseInstructions
               return ()
             else
@@ -474,7 +475,17 @@ checkInstruction instruction = do
         Unreachable                                           -> return ()
         Nop                                                   -> return ()
         Br idx                                                -> return ()
-        BrIf idx                                              -> return ()
+
+        BrIf idx                                              -> do
+            maybeFrame <- lookupControlFrame idx
+            case maybeFrame of
+                Just frame -> do
+                    popCheckOpd (Just I32)
+                    popCheckOpds (labelTypes frame)
+                    pushOpds (labelTypes frame)
+                Nothing -> do
+                    liftIO $ printError (BrTargetNotFound idx)
+                    fail ""
         BrTable idxs idx                                      -> return ()
         Return                                                -> return ()
         Call idx                                              -> do
@@ -680,6 +691,7 @@ resultToCheckType (Result vt) =
     Just vt
 
 
+
 -- NUMERIC INSTRUCTION CHECKS
 
 
@@ -881,12 +893,12 @@ popControlFrame = do
             fail ""
 
 
-pushControlFrame :: [CheckValType] -> [CheckValType] -> ValidationState ()
-pushControlFrame labels results = do
+pushControlFrame :: MaybeIdent -> [CheckValType] -> [CheckValType] -> ValidationState ()
+pushControlFrame maybeIdent labels results = do
     (context, localContext) <- get
     frames <- return $ controlStack localContext
     opds <- return $ operandStack localContext
-    let frame = ControlFrame { labelTypes = labels, resultTypes = results, height = length opds, unreachable = False } in do
+    let frame = ControlFrame { label = maybeIdent, labelTypes = labels, resultTypes = results, height = length opds, unreachable = False } in do
         put (context, localContext { controlStack = frame : frames})
         return ()
 
@@ -1034,6 +1046,25 @@ lookupFunc idx = do
             return Nothing
 
 
+lookupControlFrame :: ParserIdX -> ValidationState (Maybe ControlFrame)
+lookupControlFrame idx = do
+    (_, localContext) <- get
+    controlStack <- return $ controlStack localContext
+    case idx of
+        Left n   ->
+            if fromIntegral n <= length controlStack then do
+                frame <- return $ listToMaybe $
+                    [ f | (f,i) <- zip controlStack [0..], i == fromIntegral n]
+                return frame
+            else
+                return Nothing
+        Right id -> do
+            frame <- return $ listToMaybe $
+                [ f | (f,i) <- zip controlStack [0..], (Just id) == label f]
+            return frame
+
+
+
 -- SHOW
 
 
@@ -1056,8 +1087,9 @@ instance Show LocalContext where
         -- ++ "\n"
 
 instance Show ControlFrame where
-    show (ControlFrame labelTypes resultTypes height unreachable) =
-        "label types [" ++ (concat $ map showCheckValType labelTypes) ++ " ]\n"
+    show (ControlFrame label labelTypes resultTypes height unreachable) =
+        "label" ++ showMaybeId label ++ "\n"
+            ++ indent 5 ++ "label types [" ++ (concat $ map showCheckValType labelTypes) ++ " ]\n"
             ++ indent 5 ++ "result types [" ++ (concat $ map showResultType resultTypes) ++ " ]\n"
             ++ indent 5 ++ "entry height " ++ show height ++ "\n"
             ++ indent 5 ++ "unreachable " ++ show unreachable
@@ -1255,6 +1287,7 @@ data Error = MissingType ParserIdX
            | OperandMismatch
            | ExitHeightMismatch
            | FuncNotDefined ParserIdX
+           | BrTargetNotFound ParserIdX
 
 
 printError :: Error -> IO ()
@@ -1290,6 +1323,9 @@ showError error =
             "The operand stack was not returned to its initial height at the end of this block"
         FuncNotDefined idx ->
             "The func" ++ showIdX idx ++ " is not defined"
+        BrTargetNotFound idx ->
+            "Could not find a frame with idx" ++ showIdX idx ++ " to br to"
+
 
 printImportOrderError :: IO ()
 printImportOrderError =
