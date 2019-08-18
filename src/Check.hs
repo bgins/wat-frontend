@@ -464,18 +464,24 @@ checkInstruction instruction = do
             pushControlFrame maybeIdent (toLabelTypes resultType) (toLabelTypes resultType)
             results <- checkBlock ifInstructions
             if not $ null elseInstructions then do
-              -- clear results and check else arm
               printElseStep instruction
-              popCheckOpds results
+              popCheckOpds results -- clear results from if arm
               pushControlFrame maybeIdent results results
               checkBlock elseInstructions
               return ()
             else
               return ()
-        Unreachable                                           -> return ()
+        Unreachable                                           -> unreachable_
         Nop                                                   -> return ()
-        Br idx                                                -> return ()
-
+        Br idx                                                -> do
+            maybeFrame <- lookupControlFrame idx
+            case maybeFrame of
+                Just frame -> do
+                    popCheckOpds (labelTypes frame)
+                    unreachable_
+                Nothing -> do
+                    liftIO $ printError (BrTargetNotFound idx)
+                    fail ""
         BrIf idx                                              -> do
             maybeFrame <- lookupControlFrame idx
             case maybeFrame of
@@ -835,6 +841,7 @@ popOpd = do
         Left err ->
             fail err
 
+
 popCheckOpd :: CheckValType ->  ValidationState (CheckValType)
 popCheckOpd expect = do
     actual <- popOpd
@@ -901,6 +908,24 @@ pushControlFrame maybeIdent labels results = do
     let frame = ControlFrame { label = maybeIdent, labelTypes = labels, resultTypes = results, height = length opds, unreachable = False } in do
         put (context, localContext { controlStack = frame : frames})
         return ()
+
+
+unreachable_ :: ValidationState ()
+unreachable_ = do
+    (context, localContext) <- get
+    frames <- return $ controlStack localContext
+    case safeHead frames of
+        Right frame -> do
+            opdStack <- return $ operandStack localContext
+            resizedOpdStack <- return $ snd $ splitAt (length opdStack - height frame) opdStack
+            case safeTail frames of
+                Right controlStackTail -> do
+                    put (context, localContext { operandStack = resizedOpdStack, controlStack = frame { unreachable = True } : controlStackTail})
+                Left err ->
+                    fail err
+        Left err ->
+           fail err
+
 
 
 safeHead :: [a] -> Either String a
