@@ -493,7 +493,16 @@ checkInstruction instruction = do
                     liftIO $ printError (BrTargetNotFound idx)
                     fail ""
         BrTable idxs idx                                      -> return ()
-        Return                                                -> return ()
+        Return                                                -> do
+            outermostIndex <- return $ fromIntegral $ (length $ controlStack localContext) - 1
+            maybeFrame <- lookupControlFrame (Left outermostIndex)
+            case maybeFrame of
+                Just frame -> do
+                    popCheckOpds (labelTypes frame)
+                    unreachable_
+                Nothing -> do
+                    liftIO $ printError (BrTargetNotFound $ Left outermostIndex)
+                    fail ""
         Call idx                                              -> do
             functype <- lookupFunc idx
             case functype of
