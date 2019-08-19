@@ -172,6 +172,7 @@ registerComponent component =
         Start _ ->
             return ()
         Global maybeId globaltype _ -> do
+            printStep component
             context <- get
             updatedGlobals <- addContextEntry "global" maybeId globaltype (globals context)
             put (context { globals = updatedGlobals })
