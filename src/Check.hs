@@ -45,7 +45,7 @@ data LocalContext = LocalContext
 data ControlFrame = ControlFrame
    { label :: MaybeIdent
    , labelTypes :: [CheckValType]
-   , resultTypes :: [CheckValType]
+   , endTypes :: [CheckValType]
    , height :: Int
    , unreachable :: Bool
    }
@@ -78,15 +78,15 @@ check filepath = do
         Right ast ->
             case ast of
                 Module maybeId components -> do
-                    putStrLn "① Checking import order..."
+                    putStrLn "① Checking import order"
                     if checkImportOrder components then do
-                        liftIO $ putStrLn "② Adding types to the context..."
+                        liftIO $ putStrLn "② Adding types to the context"
                         typedContext <- execStateT (registerTypes components) emptyContext
-                        liftIO $ putStrLn "③ Adding imports, funcs, and globals to the context..."
+                        liftIO $ putStrLn "③ Adding imports, funcs, and globals to the context"
                         context <- execStateT (registerComponents components) typedContext
                         if valid context then do
                             putStrLn $ show context
-                            putStrLn "④ Checking func bodies, starts and exports..."
+                            putStrLn "④ Checking func bodies, starts and exports"
                             checkedContext <- execStateT (check_ components) context
                             if valid checkedContext then
                                 putStrLn "✓ Module is valid"
@@ -263,7 +263,7 @@ checkTypeUse idx = do
                 Left n   -> return $ Just n
                 Right id -> return $ resolveId (Just id) (types context)
         Nothing -> do
-            liftIO $ printError (MissingType idx)
+            liftIO $ printError (TypeNotDefined idx)
             put (context { valid = False })
             return Nothing
 
@@ -286,7 +286,7 @@ checkTypeUseWithDeclarations idx params results = do
                         put (context { valid = False })
                         return Nothing
         Nothing -> do
-            liftIO $ printError (MissingType idx)
+            liftIO $ printError (TypeNotDefined idx)
             put (context { valid = False })
             return Nothing
 
@@ -354,7 +354,7 @@ checkFunc maybeIdent typeuse locals instructions = do
     context <- get
     bodyLocals <- makeBodyLocals typeuse locals
     results <- lookupResults typeuse
-    let controlFrame = ControlFrame {label = maybeIdent, labelTypes = results, resultTypes = results , height = 0, unreachable = False}
+    let controlFrame = ControlFrame {label = maybeIdent, labelTypes = results, endTypes = results , height = 0, unreachable = False}
         emptyLocalContext = LocalContext { locals = bodyLocals, operandStack = [], controlStack = [controlFrame] }
     (_, (checkedContext, _)) <- lift $ runStateT (checkBlock instructions) (context, emptyLocalContext)
     put (context { valid = valid checkedContext })
@@ -371,7 +371,7 @@ checkStart idx = do
                 return ()
             Nothing -> do
                 put (context { valid = False })
-                liftIO $ printError (MissingType idx)
+                liftIO $ printError (TypeNotDefined idx)
                 return ()
     else do
         put (context { valid = False })
@@ -383,20 +383,11 @@ checkGlobal :: MaybeIdent -> GlobalType -> Instructions ParserIdX -> ContextStat
 checkGlobal maybeIdent globaltype instructions = do
     context <- get
     results <- return $ lookupGlobalResult globaltype
-    let controlFrame = ControlFrame {label = maybeIdent, labelTypes = results, resultTypes = results , height = 0, unreachable = False}
+    let controlFrame = ControlFrame {label = maybeIdent, labelTypes = results, endTypes = results , height = 0, unreachable = False}
         emptyLocalContext = LocalContext { locals = [], operandStack = [], controlStack = [controlFrame] }
     (_, (checkedContext, _)) <- lift $ runStateT (checkBlock instructions) (context, emptyLocalContext)
     put (context { valid = valid checkedContext })
     return ()
-
-
-lookupGlobalResult :: GlobalType -> [CheckValType]
-lookupGlobalResult globaltype =
-    case globaltype of
-        GlobalConst valtype -> 
-            [Just valtype]
-        GlobalVar valtype ->
-            [Just valtype]
 
 
 checkExport :: Name -> ExportDescription ParserIdX -> ContextState ()
@@ -413,17 +404,6 @@ checkExport name exportdesc = do
           GlobalExport idx ->
               lookupExport idx (globals context)
 
-
-lookupExport :: ParserIdX -> [(MaybeIdent, a)] -> ContextState ()
-lookupExport idx contextSpace = 
-    case lookupByIdX idx contextSpace of
-        Just _ ->
-            return ()
-        Nothing -> do
-            context <- get
-            put (context { valid = False })
-            liftIO $ printError (MissingType idx)
-            return ()
 
 
 -- CHECK FUNC BODY
@@ -451,11 +431,11 @@ checkInstruction instruction = do
     (context, localContext) <- get
     case instruction of
         -- control instructions [§3.3.5]
-        Block maybeIdent resultType instructions              -> do
+        Block maybeIdent resultType instructions                          -> do
             pushControlFrame maybeIdent (toLabelTypes resultType) (toLabelTypes resultType)
             checkBlock instructions
             return ()
-        Loop maybeIdent resultType instructions               -> do
+        Loop maybeIdent resultType instructions                           -> do
             pushControlFrame maybeIdent [] (toLabelTypes resultType)
             checkBlock instructions
             return ()
@@ -474,44 +454,25 @@ checkInstruction instruction = do
         Unreachable                                           -> unreachable_
         Nop                                                   -> return ()
         Br idx                                                -> do
-            maybeFrame <- lookupControlFrame idx
-            case maybeFrame of
-                Just frame -> do
-                    popCheckOpds (labelTypes frame)
-                    unreachable_
-                Nothing -> do
-                    liftIO $ printError (BrTargetNotFound idx)
-                    fail ""
+            frame <- lookupControlFrame idx
+            popCheckOpds (labelTypes frame)
+            unreachable_
         BrIf idx                                              -> do
-            maybeFrame <- lookupControlFrame idx
-            case maybeFrame of
-                Just frame -> do
-                    popCheckOpd (Just I32)
-                    popCheckOpds (labelTypes frame)
-                    pushOpds (labelTypes frame)
-                Nothing -> do
-                    liftIO $ printError (BrTargetNotFound idx)
-                    fail ""
+            frame <- lookupControlFrame idx
+            popCheckOpd (Just I32)
+            popCheckOpds (labelTypes frame)
+            pushOpds (labelTypes frame)
         BrTable idxs idx                                      -> return ()
         Return                                                -> do
-            outermostIndex <- return $ fromIntegral $ (length $ controlStack localContext) - 1
-            maybeFrame <- lookupControlFrame (Left outermostIndex)
-            case maybeFrame of
-                Just frame -> do
-                    popCheckOpds (labelTypes frame)
-                    unreachable_
-                Nothing -> do
-                    liftIO $ printError (BrTargetNotFound $ Left outermostIndex)
-                    fail ""
+            outermostIndex <- return $ fromIntegral
+                $ (length $ controlStack localContext) - 1
+            frame <- lookupControlFrame (Left outermostIndex)
+            popCheckOpds (labelTypes frame)
+            unreachable_
         Call idx                                              -> do
-            functype <- lookupFunc idx
-            case functype of
-                Just (FuncType params results) -> do
-                    popCheckOpds $ map paramToCheckValType params
-                    pushOpds $ map resultToCheckValType results
-                Nothing -> do
-                    liftIO $ printError (FuncNotDefined idx)
-                    fail ""
+            (params, results) <- lookupFuncType idx
+            popCheckOpds $ map paramToCheckValType params
+            pushOpds $ map resultToCheckValType results
         CallIndirect typeuse                                  -> return ()
 
         -- parametric instructions [§3.3.2]
@@ -685,25 +646,6 @@ checkInstruction instruction = do
         I64ReinterpretF64      -> checkCvtOp F64 I64
         F32ReinterpretI32      -> checkCvtOp I32 F32
         F64ReinterpretI64      -> checkCvtOp I64 F64
-
-
-toLabelTypes :: ResultType -> [CheckValType]
-toLabelTypes resultType =
-    case resultType of
-        Just (Result valtype) ->
-            [Just valtype]
-        Nothing ->
-            []
-
-
-paramToCheckValType :: Param -> CheckValType
-paramToCheckValType (Param _ vt) =
-    Just vt
-
-
-resultToCheckType :: Result -> CheckValType
-resultToCheckType (Result vt) =
-    Just vt
 
 
 
@@ -890,7 +832,7 @@ popControlFrame = do
     controlStack <- return $ controlStack localContext
     case (listToMaybe controlStack) of
         Just frame -> do
-            expectedResults <- return $ resultTypes frame
+            expectedResults <- return $ endTypes frame
             popCheckOpds expectedResults
             (_, localContext) <- get
             operandStack <- return $ operandStack localContext
@@ -901,7 +843,7 @@ popControlFrame = do
                 case safeTail controlStack of
                     Right newStack -> do
                         put (context, localContext { controlStack = newStack })
-                        return (resultTypes frame)
+                        return (endTypes frame)
                     Left err       ->
                         fail err
         Nothing -> do
@@ -914,7 +856,7 @@ pushControlFrame maybeIdent labels results = do
     (context, localContext) <- get
     frames <- return $ controlStack localContext
     opds <- return $ operandStack localContext
-    let frame = ControlFrame { label = maybeIdent, labelTypes = labels, resultTypes = results, height = length opds, unreachable = False } in do
+    let frame = ControlFrame { label = maybeIdent, labelTypes = labels, endTypes = results, height = length opds, unreachable = False } in do
         put (context, localContext { controlStack = frame : frames})
         return ()
 
@@ -937,22 +879,26 @@ unreachable_ = do
 
 
 
-safeHead :: [a] -> Either String a
-safeHead as =
-    case as of
-        a:as -> Right a
-        []   -> Left "🗙 Cannot peek at the top of an empty stack"
+-- CONVERSIONS AND SAFE OPERATIONS
 
 
-safeTail :: [a] -> Either String [a]
-safeTail as =
-    case as of
-        a:as -> Right as
-        []   -> Left "🗙 Cannot delete the top of an empty stack"
+toLabelTypes :: ResultType -> [CheckValType]
+toLabelTypes resultType =
+    case resultType of
+        Just (Result valtype) ->
+            [Just valtype]
+        Nothing ->
+            []
 
 
+paramToCheckValType :: Param -> CheckValType
+paramToCheckValType (Param _ vt) =
+    Just vt
 
--- ASSEMBLE FUNC LOCALS
+
+resultToCheckValType :: Result -> CheckValType
+resultToCheckValType (Result valtype) =
+    Just valtype
 
 
 makeBodyLocals :: TypeUse ParserIdX -> Locals -> ContextState [(MaybeIdent, ValType)]
@@ -968,10 +914,6 @@ makeBodyLocals typeuse locals = do
             return []
 
 
--- toBodyLocal :: a -> (MaybeIdent, ValType)
--- toBodyLocal (Param maybeIdent valtype) = (maybeIdent, valtype)
--- toBodyLocal (Local maybeIdent valtype) = (maybeIdent, valtype)
-
 paramToBodyLocal :: Param -> (MaybeIdent, ValType)
 paramToBodyLocal (Param maybeIdent valtype) =
     (maybeIdent, valtype)
@@ -980,6 +922,20 @@ paramToBodyLocal (Param maybeIdent valtype) =
 localToBodyLocal :: Local -> (MaybeIdent, ValType)
 localToBodyLocal (Local maybeIdent valtype) =
     (maybeIdent, valtype)
+
+
+safeHead :: [a] -> Either String a
+safeHead as =
+    case as of
+        a:as -> Right a
+        []   -> Left "🗙 Cannot peek at the top of an empty stack"
+
+
+safeTail :: [a] -> Either String [a]
+safeTail as =
+    case as of
+        a:as -> Right as
+        []   -> Left "🗙 Cannot delete the top of an empty stack"
 
 
 
@@ -1033,7 +989,7 @@ lookupParams typeuse =
                         FuncType params _ ->
                             return (Just params)
                 Nothing -> do
-                    liftIO $ printError (MissingType idx)
+                    liftIO $ printError (TypeNotDefined idx)
                     return Nothing
         TypeUseWithDeclarations idx params results ->
             return (Just params)
@@ -1053,7 +1009,7 @@ lookupResults typeuse =
                         FuncType _ results ->
                             return $ map resultToCheckValType results
                 Nothing -> do
-                    liftIO $ printError (MissingType idx)
+                    liftIO $ printError (TypeNotDefined idx)
                     return []
         TypeUseWithDeclarations idx params results ->
             return $ map resultToCheckValType results
@@ -1061,41 +1017,70 @@ lookupResults typeuse =
             return $ map resultToCheckValType results
 
 
-resultToCheckValType :: Result -> CheckValType
-resultToCheckValType (Result valtype) =
-    Just valtype
-
-
-lookupFunc :: ParserIdX -> ValidationState (Maybe FuncType)
-lookupFunc idx = do
+lookupFuncType :: ParserIdX -> ValidationState (Params, Results)
+lookupFuncType idx = do
     (context, _) <- get
     case lookupByIdX idx (funcs context) of
         Just typeIndex ->
             case lookupByIndex typeIndex (types context) of
-                Just functype -> do
-                    return (Just functype)
-                Nothing ->
-                    fail "type for func not found"
-        Nothing                        ->
-            return Nothing
+                Just (FuncType params results) -> do
+                    return (params, results)
+                Nothing -> do
+                    liftIO $ printError (TypeNotDefined idx)
+                    fail ""
+        Nothing                        -> do
+            liftIO $ printError (FuncNotDefined idx)
+            fail ""
 
 
-lookupControlFrame :: ParserIdX -> ValidationState (Maybe ControlFrame)
+lookupControlFrame :: ParserIdX -> ValidationState ControlFrame
 lookupControlFrame idx = do
     (_, localContext) <- get
     controlStack <- return $ controlStack localContext
     case idx of
         Left n   ->
             if fromIntegral n <= length controlStack then do
-                frame <- return $ listToMaybe $
+                maybeFrame <- return $ listToMaybe $
                     [ f | (f,i) <- zip controlStack [0..], i == fromIntegral n]
-                return frame
-            else
-                return Nothing
+                case maybeFrame of
+                    Just frame ->
+                        return frame
+                    Nothing -> do
+                        liftIO $ printError (BrTargetNotFound idx)
+                        fail ""
+            else do
+                liftIO $ printError (BrTargetOutOfRange idx)
+                fail ""
         Right id -> do
-            frame <- return $ listToMaybe $
+            maybeFrame <- return $ listToMaybe $
                 [ f | (f,i) <- zip controlStack [0..], (Just id) == label f]
-            return frame
+            case maybeFrame of
+                Just frame ->
+                    return frame
+                Nothing -> do
+                    liftIO $ printError (BrTargetNotFound idx)
+                    fail ""
+
+
+lookupGlobalResult :: GlobalType -> [CheckValType]
+lookupGlobalResult globaltype =
+    case globaltype of
+        GlobalConst valtype -> 
+            [Just valtype]
+        GlobalVar valtype ->
+            [Just valtype]
+
+
+lookupExport :: ParserIdX -> [(MaybeIdent, a)] -> ContextState ()
+lookupExport idx contextSpace = 
+    case lookupByIdX idx contextSpace of
+        Just _ ->
+            return ()
+        Nothing -> do
+            context <- get
+            put (context { valid = False })
+            liftIO $ printError (TypeNotDefined idx)
+            return ()
 
 
 
@@ -1121,10 +1106,10 @@ instance Show LocalContext where
         -- ++ "\n"
 
 instance Show ControlFrame where
-    show (ControlFrame label labelTypes resultTypes height unreachable) =
+    show (ControlFrame label labelTypes endTypes height unreachable) =
         "label" ++ showMaybeId label ++ "\n"
             ++ indent 5 ++ "label types [" ++ (concat $ map showCheckValType labelTypes) ++ " ]\n"
-            ++ indent 5 ++ "result types [" ++ (concat $ map showResultType resultTypes) ++ " ]\n"
+            ++ indent 5 ++ "result types [" ++ (concat $ map showResultType endTypes) ++ " ]\n"
             ++ indent 5 ++ "entry height " ++ show height ++ "\n"
             ++ indent 5 ++ "unreachable " ++ show unreachable
             ++ "\n"
@@ -1309,8 +1294,8 @@ printBlockMark blockChar = do
 -- ERRORS
 
 
-data Error = MissingType ParserIdX
-           | MissingFunc ParserIdX
+data Error = TypeNotDefined ParserIdX
+           | FuncNotDefined ParserIdX
            | TypeDeclMismatch ParserIdX
            | MultipleStart
            | ImportOrder
@@ -1320,8 +1305,8 @@ data Error = MissingType ParserIdX
            | PopEmptyFrames
            | OperandMismatch
            | ExitHeightMismatch
-           | FuncNotDefined ParserIdX
            | BrTargetNotFound ParserIdX
+           | BrTargetOutOfRange ParserIdX
 
 
 printError :: Error -> IO ()
@@ -1329,15 +1314,21 @@ printError =
     putStrLn . ("🗙 " ++) . showError
 
 
+printErrorFail :: Error -> IO ()
+printErrorFail = do
+    putStrLn . ("🗙 " ++) . showError
+    fail ""
+
+
 showError :: Error -> String
 showError error =
     case error of
-        MissingType idx ->
-            "A type with the identifier" ++ (showIdX idx) ++ " could not be found\n"
-        MissingFunc idx ->
-            "A func with the identifier" ++ (showIdX idx) ++ " could not be found\n"
+        TypeNotDefined idx ->
+            "A type with the identifier" ++ showIdX idx ++ " could not be found"
+        FuncNotDefined idx ->
+            "A func with the identifier" ++ showIdX idx ++ " could not be found"
         TypeDeclMismatch idx ->
-            "The inline declarations used in this type use do not match the reference type" ++ (showIdX idx) ++ "\n"
+            "The inline declarations used in this type use do not match the reference type" ++ showIdX idx
         MultipleStart ->
             "A start component has already registered an entry point to this module"
         ImportOrder ->
@@ -1355,10 +1346,10 @@ showError error =
             "Actual operand does not match expected operand"
         ExitHeightMismatch ->
             "The operand stack was not returned to its initial height at the end of this block"
-        FuncNotDefined idx ->
-            "The func" ++ showIdX idx ++ " is not defined"
         BrTargetNotFound idx ->
             "Could not find a frame with idx" ++ showIdX idx ++ " to br to"
+        BrTargetOutOfRange idx ->
+            "A br to idx" ++ showIdX idx ++ " exceeds the current block depth"
 
 
 printImportOrderError :: IO ()
