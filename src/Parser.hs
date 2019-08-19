@@ -162,7 +162,7 @@ data ValType = I32
              | F32
              | F64 deriving (Eq)
 
-data Param = Param MaybeIdent ValType deriving (Eq)
+data Param = Param MaybeIdent ValType
 
 type Params = [Param]
 
@@ -1120,6 +1120,13 @@ instance ToTree (Component ParserIdX) where
         leaf $ "start"  ++ showIdX funcidx
     toTree (Export name exportdesc) =
         Node ("export" ++ show name) $ [toTree exportdesc]
+
+
+-- EQ
+
+
+instance Eq Param where
+    Param _ vt1 == Param _ vt2 = vt1 == vt2
 
 
 
