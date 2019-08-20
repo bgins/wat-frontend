@@ -465,8 +465,7 @@ checkInstruction instruction = do
             pushOpds (labelTypes frame)
         BrTable idxs idx                                      -> return ()
         Return                                                -> do
-            outermostIndex <- return $ fromIntegral
-                $ (length $ controlStack localContext) - 1
+            let outermostIndex = (toIndex $ length $ controlStack localContext) - 1
             frame <- lookupControlFrame (Left outermostIndex)
             popCheckOpds (labelTypes frame)
             unreachable_
@@ -883,6 +882,11 @@ unreachable_ = do
 -- CONVERSIONS AND SAFE OPERATIONS
 
 
+toIndex :: Int -> Word32
+toIndex int =
+    fromIntegral int
+
+
 toLabelTypes :: ResultType -> [CheckValType]
 toLabelTypes resultType =
     case resultType of
@@ -1040,9 +1044,9 @@ lookupControlFrame idx = do
     controlStack <- return $ controlStack localContext
     case idx of
         Left n   ->
-            if fromIntegral n <= length controlStack then do
+            if n <= toIndex (length controlStack) then do
                 maybeFrame <- return $ listToMaybe $
-                    [ f | (f,i) <- zip controlStack [0..], i == fromIntegral n]
+                    [ f | (f,i) <- zip controlStack [0..], toIndex i == n]
                 case maybeFrame of
                     Just frame ->
                         return frame
@@ -1066,14 +1070,14 @@ lookupControlFrame idx = do
 lookupGlobalResult :: GlobalType -> [CheckValType]
 lookupGlobalResult globaltype =
     case globaltype of
-        GlobalConst valtype -> 
+        GlobalConst valtype ->
             [Just valtype]
         GlobalVar valtype ->
             [Just valtype]
 
 
 lookupExport :: ParserIdX -> [(MaybeIdent, a)] -> ContextState ()
-lookupExport idx contextSpace = 
+lookupExport idx contextSpace =
     case lookupByIdX idx contextSpace of
         Just _ ->
             return ()
@@ -1225,7 +1229,7 @@ printFuncStep component = do
     liftIO $ printTree component
     liftIO $ putStr "\n"
 
-  
+
 printGlobalStep :: Component ParserIdX -> ContextState ()
 printGlobalStep component = do
     liftIO $ putStrLn "🞊••••••••••••••••"
@@ -1261,7 +1265,7 @@ printBlockStep instruction = do
             liftIO $ putStr "\n"
         _                    ->
             return ()
- 
+
 
 printElseStep :: Instruction ParserIdX -> ValidationState ()
 printElseStep instruction = do
@@ -1313,12 +1317,6 @@ data Error = TypeNotDefined ParserIdX
 printError :: Error -> IO ()
 printError =
     putStrLn . ("🗙 " ++) . showError
-
-
-printErrorFail :: Error -> IO ()
-printErrorFail = do
-    putStrLn . ("🗙 " ++) . showError
-    fail ""
 
 
 showError :: Error -> String
