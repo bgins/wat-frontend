@@ -1,0 +1,6 @@
+module
+  func
+    typeuse
+    block $missing
+      result i32
+      nop

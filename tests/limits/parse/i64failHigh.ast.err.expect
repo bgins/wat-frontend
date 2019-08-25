@@ -1,0 +1,3 @@
+"tests/limits/i64failHigh.wat" (line 3, column 35):
+unexpected ")"
+expecting "_", digit or int 18446744073709551616 out of range. Expected a 64-bit integer.

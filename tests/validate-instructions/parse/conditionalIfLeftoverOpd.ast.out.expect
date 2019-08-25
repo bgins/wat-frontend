@@ -1,0 +1,7 @@
+module
+  func
+    typeuse
+    i32.const 1
+    if $ifConst
+      i32.const 2
+    drop

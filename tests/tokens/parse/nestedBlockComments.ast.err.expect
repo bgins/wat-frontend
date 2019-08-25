@@ -1,0 +1,3 @@
+"tests/tokens/nestedBlockComments.tok" (line 3, column 3):
+unexpected end of input
+expecting " ", ";;", "(;" or "("

@@ -1,0 +1,11 @@
+module
+  func $leftoverOpd
+    typeuse
+    i32.const 1
+    if $block
+      br $block
+      nop
+      else
+      br $block
+      i64.const 1
+    drop

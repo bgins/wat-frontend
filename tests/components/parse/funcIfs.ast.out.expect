@@ -1,0 +1,27 @@
+module
+  func $funcId
+    typeuse 1
+      param i32
+      result i32
+    if $labelA
+      result i32
+      i32.const 1
+      else
+      i32.const 1
+    if $labelB
+      result i32
+      i32.const 1
+      else
+      i32.const 1
+    if
+      result i32
+      i32.const 1
+      else
+      i32.const 1
+    if
+      i32.const 1
+      else
+      i32.const 1
+    if $labelC
+      result i32
+      i32.const 1

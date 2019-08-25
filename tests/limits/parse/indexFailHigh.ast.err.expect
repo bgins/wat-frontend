@@ -1,0 +1,3 @@
+"tests/limits/indexFailHigh.wat" (line 3, column 18):
+unexpected ")"
+expecting "_", digit or index 4294967296 out of range. Ids must be 32-bit unsigned integers.

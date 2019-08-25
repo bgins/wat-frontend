@@ -1,0 +1,3 @@
+"tests/limits/i32failHighSigned.wat" (line 3, column 26):
+unexpected ")"
+expecting "_", digit or int 2147483648 out of range. Expected a signed 32-bit integer.

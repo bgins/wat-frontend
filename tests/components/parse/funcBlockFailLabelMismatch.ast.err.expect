@@ -1,0 +1,2 @@
+"tests/components/funcBlockFailLabelMismatch.wat" (line 7, column 19):
+unexpected : block label and trailing id must match

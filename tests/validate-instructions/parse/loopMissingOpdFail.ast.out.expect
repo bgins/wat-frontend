@@ -1,0 +1,6 @@
+module
+  func
+    typeuse
+    loop $missing
+      result i32
+      nop

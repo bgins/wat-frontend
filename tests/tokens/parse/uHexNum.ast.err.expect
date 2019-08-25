@@ -1,0 +1,3 @@
+"tests/tokens/uHexNum.tok" (line 1, column 1):
+unexpected "0"
+expecting " ", ";;", "(;" or "("

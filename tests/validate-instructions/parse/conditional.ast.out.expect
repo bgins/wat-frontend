@@ -1,0 +1,61 @@
+module
+  func
+    typeuse
+    i32.const 1
+    if $ifNop
+      nop
+    i32.const 1
+    if $ifConst
+      result i32
+      i32.const 2
+    drop
+    i32.const 1
+    if $ifConst
+      result i32
+      i32.const 1
+      if $ifInnerConst
+        result i32
+        i32.const 2
+    drop
+    i32.const 1
+    if $ifElseNop
+      nop
+      else
+      nop
+    i32.const 1
+    if $ifElseConst
+      result i32
+      i32.const 1
+      else
+      i32.const 0
+    drop
+    i32.const 1
+    if $ifElseConst
+      result i32
+      i32.const 1
+      if $ifNestedInIf
+        result i32
+        i32.const 2
+      else
+      i32.const 1
+      if $ifNestedInElse
+        result i32
+        i32.const 3
+    drop
+    i32.const 1
+    if $ifElseConst
+      result i32
+      i32.const 1
+      if $ifelseNestedInIf
+        result i32
+        i32.const 2
+        else
+        i32.const 3
+      else
+      i32.const 1
+      if $ifelseNestedInElse
+        result i32
+        i32.const 4
+        else
+        i32.const 5
+    drop

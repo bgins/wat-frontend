@@ -1,0 +1,3 @@
+"tests/limits/i32failHigh.wat" (line 3, column 25):
+unexpected ")"
+expecting "_", digit or int 4294967296 out of range. Expected a 32-bit integer.

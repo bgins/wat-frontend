@@ -1,0 +1,4 @@
+module
+  func
+    typeuse
+    br 4294967295

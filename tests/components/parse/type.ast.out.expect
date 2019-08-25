@@ -1,0 +1,5 @@
+module
+  type
+    functype
+      param i32
+      result i32

@@ -1,0 +1,27 @@
+module
+  func $labelTests
+    typeuse
+    loop $block
+      return
+    loop $outerBlock
+      loop
+        return
+      nop
+  func $resultsMatch
+    typeuse
+      result i64
+    loop $block
+      result i64
+      i64.const 1
+      return
+      i64.add
+    drop
+    loop $outerBlock
+      result i64
+      i64.const 1
+      loop
+        result i64
+        i64.const 1
+        return
+        i64.add
+      i64.add

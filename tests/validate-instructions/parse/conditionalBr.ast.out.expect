@@ -1,0 +1,109 @@
+module
+  func $labelTests
+    typeuse
+    i32.const 1
+    if $block
+      br $block
+      nop
+      else
+      br $block
+      nop
+    i32.const 1
+    if $outerBlock
+      i32.const 1
+      if
+        br $outerBlock
+        nop
+        else
+        br $outerBlock
+        nop
+      nop
+    i32.const 1
+    if
+      i32.const 1
+      if
+        br $labelTests
+        nop
+        else
+        br $labelTests
+        nop
+      nop
+  func $indexTests
+    typeuse
+    i32.const 1
+    if
+      br 0
+      nop
+      else
+      br 0
+      nop
+    i32.const 1
+    if
+      i32.const 1
+      if
+        br 1
+        nop
+        else
+        br 1
+        nop
+      nop
+    i32.const 1
+    if
+      i32.const 1
+      if
+        br 2
+        nop
+        else
+        br 2
+        nop
+      nop
+  func $resultsMatch
+    typeuse
+      result i64
+    i32.const 1
+    if $block
+      result i64
+      i64.const 1
+      br $block
+      i64.add
+      else
+      i64.const 1
+      br $block
+      i64.const 1
+      i64.sub
+    drop
+    i32.const 1
+    if $outerBlock
+      result i64
+      i64.const 1
+      i32.const 1
+      if
+        result i64
+        i64.const 1
+        br $outerBlock
+        i64.const 1
+        i64.add
+        else
+        i64.const 1
+        br $outerBlock
+        i64.sub
+      i64.add
+    drop
+    i32.const 1
+    if $outerBlock
+      result i64
+      i32.const 0
+      if
+        result i64
+        i64.const 1
+        br $resultsMatch
+        i64.add
+        else
+        i64.const 1
+        br $resultsMatch
+        i64.const 1
+        i64.sub
+      br 1
+      i64.add
+    i64.const 1
+    i64.add

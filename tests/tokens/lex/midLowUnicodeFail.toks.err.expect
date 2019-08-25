@@ -1,0 +1,2 @@
+"tests/tokens/midLowUnicodeFail.tok" (line 1, column 10):
+unexpected Invalid unicode charater "u{d800}" in string

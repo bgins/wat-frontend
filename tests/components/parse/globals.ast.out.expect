@@ -1,0 +1,13 @@
+module
+  global
+    const i32
+    i32.const 1
+  global
+    mut i32
+    i32.const 1
+  global $globalId
+    const i32
+    i32.const 1
+  global $globalId
+    mut i32
+    i32.const 1
