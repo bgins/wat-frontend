@@ -82,6 +82,7 @@ check filepath = do
                     if checkImportOrder components then do
                         putStrLn "② Add types to the context"
                         typedContext <- execStateT (registerTypes components) emptyContext
+                        putStrLn $ show typedContext
                         putStrLn "③ Add imports, funcs, and globals to the context"
                         context <- execStateT (registerComponents components) typedContext
                         if valid context then do

@@ -22,8 +22,8 @@ args = Args
       <$> argument str
           (metavar "PHASE"
          <> help "lex [produce a token stream], \
-                 \parse [produce an AST directly from source], \
-                 \check [*experimental* perform semantic analysis on an AST]" )
+                 \parse [produce an AST], \
+                 \check [perform semantic analysis]" )
       <*> argument str
           (metavar "TARGET"
          <> help "A target .wat or .tok file" )
@@ -31,7 +31,7 @@ args = Args
           $ long "out"
          <> short 'o'
          <> metavar "DIRECTORY"
-         <> help "Optional output directory. Print to console if missing." )
+         <> help "Optional output directory. Print to console if missing. Not implemented for check." )
 
 
 

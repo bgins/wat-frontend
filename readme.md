@@ -29,76 +29,236 @@ This will produce a `wat-frontend` binary in `dist/build/wat-frontend/`.
 
 ## Use
 
-The lexer and parser target WebAssembly text files (`.wat`). The lexer can also
+The lexer, parser, and typechecker target WebAssembly text files (`.wat`). The lexer can also
 be used on files with WebAssembly text tokens (`.tok`).
 
-Assuming a directory that contains the `wat-frontend` binary, `identifier.tok`,
-and `add.wat`, you can use the lexer to print token streams with the following commands:
+Assuming a directory that contains the `wat-frontend` binary and `add.wat`, the
+lexer can be used to produce token streams:
 ```
-$ cat identifier.tok 
-$name
-$ ./wat-frontend lex identifier.tok 
-• Token stream for identifier.tok •
-[$name]
 $ cat add.wat 
 (module
-  (import "env" "print" (func $print (param i32)))
-  (func $main
-    i32.const 21
-    i32.const 21
-    i32.add
-    call $print)
-  (export "main" (func $main)))
+  (type $binop (func (param i32) (param i32) (result i32)))
+  (func $add (type $binop) (param $lhs i32) (param $rhs i32) (result i32)
+    local.get $lhs
+    local.get $rhs
+    i32.add)
+  (export "add" (func $add)))
 $ ./wat-frontend lex add.wat 
 • Token stream for add.wat •
-['(',module,'(',import,"env","print",'(',func,$print,'(',param,i32,')',')',')','(',func,$main,i32.const,21,i32.const,21,i32.add,call,$print,')','(',export,"main",'(',func,$main,')',')',')']
-$ 
+['(',module,'(',type,$binop,'(',func,'(',param,i32,')','(',param,i32,')','(',result,i32,')',')',')','(',func,$add,'(',type,$binop,')','(',param,$lhs,i32,')','(',param,$rhs,i32,')','(',result,i32,')',local.get,$lhs,local.get,$rhs,i32.add,')','(',export,"add",'(',func,$add,')',')',')']
+$
 ```
 
-The following command uses the parser to print an AST for `add.wat`:
+The parser produces ASTs:
 ```
 $ ./wat-frontend parse add.wat 
 • AST for add.wat •
   module
-    import "env" "print"
-      func $print
-        typeuse
-          param i32
-    func $main
-      typeuse
-      i32.const 21
-      i32.const 21
+    type $binop
+      functype
+        param i32
+        param i32
+        result i32
+    func $add
+      typeuse $binop
+        param $lhs i32
+        param $rhs i32
+        result i32
+      local.get $lhs
+      local.get $rhs
       i32.add
-      call $print
-    export "main"
-      func $main
-$ 
+    export "add"
+      func $add
+$
 ```
 
-The `-o` flag writes the output of the lexer or parser to file in a target
-directory:
+The typechecker checks modules and prints verbose analysis:
+```
+$ ./wat-frontend check add.wat 
+① Check import order
+② Add types to the context
+∙context∙
+  types
+  funcs
+  globals
+  start
+  exports
+  valid True
+
+🞅∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙
+∙component∙
+  type $binop
+    functype
+      param i32
+      param i32
+      result i32
+
+∙context∙
+  types
+      $binop : i32 -> i32 -> i32
+  funcs
+  globals
+  start
+  exports
+  valid True
+
+③ Add imports, funcs, and globals to the context
+∙context∙
+  types
+      $binop : i32 -> i32 -> i32
+  funcs
+  globals
+  start
+  exports
+  valid True
+
+🞅∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙
+∙component∙
+  func $add
+    typeuse $binop
+      param $lhs i32
+      param $rhs i32
+      result i32
+    local.get $lhs
+    local.get $rhs
+    i32.add
+
+∙context∙
+  types
+      $binop : i32 -> i32 -> i32
+  funcs
+      $add : {0}
+  globals
+  start
+  exports
+  valid True
+
+④ Check func bodies, starts and exports
+λ••••••••••••••••
+checking func body:
+  func $add
+    typeuse $binop
+      param $lhs i32
+      param $rhs i32
+      result i32
+    local.get $lhs
+    local.get $rhs
+    i32.add
+
+∙🞎∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙
+∙local context∙
+  locals
+      $lhs : i32
+      $rhs : i32
+  operand stack
+      [ ]
+  control stack
+      0 | label $add
+          label types [ i32 ]
+          result types [ i32 ]
+          entry height 0
+          unreachable False
+
+
+∙⬚∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙
+  local.get $lhs
+
+  locals
+      $lhs : i32
+      $rhs : i32
+  operand stack
+      [ i32 ]
+
+
+∙⬚∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙
+  local.get $rhs
+
+  locals
+      $lhs : i32
+      $rhs : i32
+  operand stack
+      [ i32 i32 ]
+
+
+∙⬚∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙
+  i32.add
+
+  locals
+      $lhs : i32
+      $rhs : i32
+  operand stack
+      [ i32 ]
+
+
+🞎∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙
+∙local context∙
+  locals
+      $lhs : i32
+      $rhs : i32
+  operand stack
+      [ i32 ]
+  control stack
+
+
+∙context∙
+  types
+      $binop : i32 -> i32 -> i32
+  funcs
+      $add : {0}
+  globals
+  start
+  exports
+  valid True
+
+🞅∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙∙
+∙component∙
+  export "add"
+    func $add
+
+⑤ Show final context
+∙context∙
+  types
+      $binop : i32 -> i32 -> i32
+  funcs
+      $add : {0}
+  globals
+  start
+  exports
+       "add"
+  valid True
+
+✓ Module is valid
+$
+```
+
+The `-o` flag writes the output of the lexer or parser to file to a target
+directory (the directory must already exist):
 ```
 $ ./wat-frontend parse add.wat -o output/
-$ cat output/add.ast.out 
+$ cat output/add.ast.out
 module
-  import "env" "print"
-    func $print
-      typeuse
-        param i32
-  func $main
-    typeuse
-    i32.const 21
-    i32.const 21
+  type $binop
+    functype
+      param i32
+      param i32
+      result i32
+  func $add
+    typeuse $binop
+      param $lhs i32
+      param $rhs i32
+      result i32
+    local.get $lhs
+    local.get $rhs
     i32.add
-    call $print
-  export "main"
-    func $main
-$ 
+  export "add"
+    func $add
+$
 ```
 
-The target directory must already exist. An `.ast.out` file is produced on
-success and a `.ast.err` file is produced on failure. The output from the lexer
-follows a similar pattern, but with `ast` replaced by `toks`.
+An `.ast.out` file is produced on success and a `.ast.err` file is produced on
+failure. The output from the lexer follows a similar pattern, but with `ast`
+replaced by `toks`. The typechecker does not currently have an option to write
+to file.
 
 
 The `-h` flag prints a summary of command line options:
@@ -110,55 +270,60 @@ Usage: wat-frontend PHASE TARGET [-o|--out DIRECTORY]
   Lexes and parses WebAssembly text or tokens
 
 Available options:
-  PHASE                    lex [produce a token stream], parse [produce an AST
-                           directly from source], check [*experimental* perform
-                           semantic analysis on an AST]
+  PHASE                    lex [produce a token stream], parse [produce an AST],
+                           check [perform semantic analysis]
   TARGET                   A target .wat or .tok file
   -o,--out DIRECTORY       Optional output directory. Print to console if
-                           missing.
+                           missing. Not implemented for check.
   -h,--help                Show this help text
-$ 
+$
 ```
 
-`wat-frontend` can also be run with `cabal run`:
+`wat-frontend` can also be run using `cabal run`:
 ```
-$ cabal run -- parse tests/programs/add.wat 
-Preprocessing executable 'wat-frontend' for wat-frontend-0.1.0.0...
+$ cabal run -- parse add.wat 
+Preprocessing executable 'wat-frontend' for wat-frontend-0.1.0.0..
+Building executable 'wat-frontend' for wat-frontend-0.1.0.0..
 Running wat-frontend...
 • AST for add.wat •
   module
-    import "env" "print"
-      func $print
-        typeuse
-          param i32
-    func $main
-      typeuse
-      i32.const 21
-      i32.const 21
+    type $binop
+      functype
+        param i32
+        param i32
+        result i32
+    func $add
+      typeuse $binop
+        param $lhs i32
+        param $rhs i32
+        result i32
+      local.get $lhs
+      local.get $rhs
       i32.add
-      call $print
-    export "main"
-      func $main
-$ 
+    export "add"
+      func $add
+$
 ```
 
 ## Tests
 
-Tests are kept in the following subdirectories of `tests`: 
+Tests are kept in the following subdirectories of `tests`:
 
 - `tokens`: plain tokens with the `.tok` extension, lexer tests
 - `components`: modules with one type of component, parser tests (some
   of these tests are not valid modules)
 - `programs`: full programs for testing any phase
 - `limits`: tests of integer bounds and representation
+- `semantic-analysis`: tests of modules and components
+- `validate-instructions`: tests of instructions
 
 `dotest` is a regression test script meant to target one of the above
 subdirectories. On first run, it will produce expected results if they are not
 present. On subsequent runs, it will `diff` the output with the expected results
-and print any differences to the console. An empty expected file means the
-result is not expected.
+and print any differences. An empty expected file means the result is not
+expected.
 
-The script will lex or parse all tests in a single directory. For example:
+`dotest` will lex or parse all tests in a single directory. For example:
 ```
 ./dotest parse tests/programs/
 ```
@@ -166,6 +331,8 @@ The script will lex or parse all tests in a single directory. For example:
 This command will parse all tests in `tests/programs/` and output the results to
 `tests/programs/parse/`. The output directory name matches the name of the
 phase run over the tests.
+
+At the moment, `docheck` does not test the typechecker.
 
 ## Validation
 
