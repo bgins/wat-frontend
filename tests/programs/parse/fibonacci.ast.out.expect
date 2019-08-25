@@ -1,0 +1,33 @@
+module
+  import "env" "print"
+    func $print
+      typeuse
+        param i32
+  func $fib
+    typeuse
+      param $0 i32
+      result i32
+    local.get $0
+    i32.const 1
+    i32.le_s
+    if
+      result i32
+      local.get $0
+      else
+      local.get $0
+      i32.const 1
+      i32.sub
+      call $fib
+      local.get $0
+      i32.const 2
+      i32.sub
+      call $fib
+      i32.add
+  func $main
+    typeuse
+    block
+      i32.const 45
+      call $fib
+      call $print
+  export "main"
+    func $main

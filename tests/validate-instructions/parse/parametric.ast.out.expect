@@ -1,0 +1,15 @@
+module
+  func $drop
+    typeuse
+      param i32
+    local.get 0
+    drop
+  func $select
+    typeuse
+      param i64
+      param i64
+    i32.const 1
+    local.get 0
+    local.get 1
+    select
+    drop

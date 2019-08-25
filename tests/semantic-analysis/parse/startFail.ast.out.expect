@@ -1,0 +1,16 @@
+module
+  start $none
+  func $add
+    typeuse
+      result i32
+    i32.const 21
+    i32.const 21
+    i32.add
+  start $add
+  func $sub
+    typeuse
+      result i32
+    i32.const 21
+    i32.const 21
+    i32.sub
+  start $sub

@@ -1,0 +1,47 @@
+module
+  import "env" "print"
+    func $print
+      typeuse
+        param i32
+  func $a
+    typeuse
+      param $0 i32
+      result i32
+    local.get $0
+    i32.const 1
+    i32.add
+  func $b
+    typeuse
+      param $0 i32
+      result i32
+    local.get $0
+    call $a
+    i32.const 1
+    i32.add
+  func $c
+    typeuse
+      param $0 i32
+      result i32
+    local.get $0
+    call $b
+    i32.const 1
+    i32.add
+  func $d
+    typeuse
+      param $0 i32
+      result i32
+    local.get $0
+    call $c
+    i32.const 1
+    i32.add
+  func $main
+    typeuse
+    local $0 i32
+    block
+      i32.const 0
+      call $d
+      local.set $0
+      local.get $0
+      call $print
+  export "main"
+    func $main

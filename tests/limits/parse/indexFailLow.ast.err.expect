@@ -1,0 +1,3 @@
+"tests/limits/indexFailLow.wat" (line 3, column 8):
+unexpected "-"
+expecting " ", ";;", "(;", "0x", digit or "$"

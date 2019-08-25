@@ -1,0 +1,42 @@
+module
+  type $binop
+    functype
+      param i32
+      param i32
+      result i32
+  import "env" "add"
+    func
+      typeuse $unop
+  import "env" "sub"
+    func
+      typeuse 1
+  import "env" "mul"
+    func
+      typeuse $unop
+        param $lhs i32
+        param $rhs i32
+        result i32
+  import "env" "div"
+    func
+      typeuse 1
+        param $lhs i32
+        param $rhs i32
+        result i32
+  import "env" "and"
+    func
+      typeuse $binop
+        param $lhs i64
+        param $rhs i32
+        result i32
+  import "env" "or"
+    func
+      typeuse 0
+        param $lhs i32
+        param $rhs i32
+        result i64
+  import "env" "xor"
+    func
+      typeuse
+        param $lhs i64
+        param $rhs i32
+        result i32

@@ -1,0 +1,8 @@
+module
+  func $missingOpd
+    typeuse
+      result i64
+    loop $block
+      return
+      nop
+    drop

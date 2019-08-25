@@ -1,0 +1,9 @@
+module
+  import "console" "log"
+    func $log
+      typeuse
+        param i32
+  import "console" "error"
+    func $error
+      typeuse
+        param i32

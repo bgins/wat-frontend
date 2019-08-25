@@ -1,0 +1,40 @@
+module
+  type $binop
+    functype
+      param i32
+      param i32
+      result i32
+  func $add
+    typeuse 0
+    local.get 0
+    local.get 1
+    i32.add
+  func $sub
+    typeuse $binop
+    local.get 0
+    local.get 1
+    i32.sub
+  func $mul
+    typeuse 0
+      param $lhs i32
+      param $rhs i32
+      result i32
+    local.get 0
+    local.get 1
+    i32.mul
+  func $div
+    typeuse $binop
+      param $lhs i32
+      param $rhs i32
+      result i32
+    local.get 0
+    local.get 1
+    i32.div_u
+  func $or
+    typeuse
+      param $lhs i32
+      param $rhs i32
+      result i32
+    local.get 0
+    local.get 1
+    i32.or

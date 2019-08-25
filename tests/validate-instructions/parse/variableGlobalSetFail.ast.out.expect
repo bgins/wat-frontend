@@ -1,0 +1,8 @@
+module
+  global
+    const i32
+    i32.const 1
+  func $globalset
+    typeuse
+    i32.const 1
+    global.set 0

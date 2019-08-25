@@ -1,0 +1,62 @@
+module
+  func $labelTests
+    typeuse
+    block $block
+      br $block
+      nop
+    block $outerBlock
+      block
+        br $outerBlock
+        nop
+      nop
+    block
+      block
+        br $labelTests
+        nop
+      nop
+  func $indexTests
+    typeuse
+    block
+      br 0
+      nop
+    block
+      block
+        br 1
+        nop
+      nop
+    block
+      block
+        br 2
+        nop
+      nop
+  func $resultsMatch
+    typeuse
+      result i64
+    block $block
+      result i64
+      i64.const 1
+      br $block
+      i64.add
+    drop
+    block $outerBlock
+      result i64
+      i64.const 1
+      block
+        result i64
+        i64.const 1
+        br $outerBlock
+        i64.add
+      i64.add
+    drop
+    block $outerBlock
+      result i64
+      block
+        result i64
+        i64.const 1
+        br $resultsMatch
+        i64.add
+      br 1
+      i64.const 1
+      i64.add
+    i64.const 1
+    i64.add

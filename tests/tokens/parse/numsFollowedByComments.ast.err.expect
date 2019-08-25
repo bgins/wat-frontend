@@ -1,0 +1,3 @@
+"tests/tokens/numsFollowedByComments.tok" (line 1, column 1):
+unexpected "1"
+expecting " ", ";;", "(;" or "("

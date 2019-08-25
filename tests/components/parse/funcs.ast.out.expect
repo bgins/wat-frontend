@@ -1,0 +1,55 @@
+module
+  func
+    typeuse
+  func $funcId
+    typeuse
+  func
+    typeuse 1
+  func
+    typeuse 1
+      param i32
+  func
+    typeuse 1
+      result i32
+  func
+    typeuse 1
+      param i32
+      result i32
+  func $funcId
+    typeuse 1
+  func $funcId
+    typeuse 1
+      param i32
+  func $funcId
+    typeuse 1
+      result i32
+  func $funcId
+    typeuse 1
+      param i32
+      result i32
+  func $funcId
+    typeuse $typeId
+  func $funcId
+    typeuse $typeId
+      param i32
+  func $funcId
+    typeuse $typeId
+      result i32
+  func $funcId
+    typeuse $typeId
+      param i32
+      result i32
+  func
+    typeuse
+      param i32
+  func
+    typeuse
+      result i32
+  func
+    typeuse
+      param i32
+      result i32
+  func $funcId
+    typeuse
+      param i32
+      result i32

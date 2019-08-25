@@ -1,0 +1,1 @@
+['(',module,'(',func,loop,$nop,end,loop,$nop,loop,$innerNop,end,end,loop,$const,'(',result,i32,')',i32.const,1,end,drop,loop,$nestedConst,'(',result,i32,')',loop,'(',result,i32,')',i32.const,1,end,end,drop,loop,$nestedConst,loop,'(',result,i32,')',i32.const,1,end,drop,end,loop,$nestedConst,'(',result,i32,')',loop,i32.const,1,drop,end,i32.const,2,end,drop,')',')']

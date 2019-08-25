@@ -1,0 +1,8 @@
+module
+  func $one
+    typeuse
+      result i32
+    nop
+  func $main
+    typeuse
+    call $one

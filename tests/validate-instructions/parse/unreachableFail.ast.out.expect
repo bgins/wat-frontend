@@ -1,0 +1,7 @@
+module
+  func
+    typeuse
+    unreachable
+    i64.const 3
+    i32.add
+    drop

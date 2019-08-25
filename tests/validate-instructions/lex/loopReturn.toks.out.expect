@@ -1,0 +1,1 @@
+['(',module,'(',func,$labelTests,loop,$block,return,end,loop,$outerBlock,loop,return,end,nop,end,')','(',func,$resultsMatch,'(',result,i64,')',loop,$block,'(',result,i64,')',i64.const,1,return,i64.add,end,drop,loop,$outerBlock,'(',result,i64,')',i64.const,1,loop,'(',result,i64,')',i64.const,1,return,i64.add,end,i64.add,end,')',')']

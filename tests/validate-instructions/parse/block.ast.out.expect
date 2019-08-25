@@ -1,0 +1,28 @@
+module
+  func
+    typeuse
+    block $nop
+    block $nop
+      block $innerNop
+    block $const
+      result i32
+      i32.const 1
+    drop
+    block $nestedConst
+      result i32
+      block
+        result i32
+        i32.const 1
+    drop
+    block $nestedConst
+      block
+        result i32
+        i32.const 1
+      drop
+    block $nestedConst
+      result i32
+      block
+        i32.const 1
+        drop
+      i32.const 2
+    drop

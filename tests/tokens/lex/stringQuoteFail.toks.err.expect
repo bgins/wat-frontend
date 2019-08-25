@@ -1,0 +1,3 @@
+"tests/tokens/stringQuoteFail.tok" (line 1, column 4):
+unexpected end of input
+expecting "\\" or "\""

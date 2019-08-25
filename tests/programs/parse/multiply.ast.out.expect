@@ -1,0 +1,13 @@
+module
+  import "env" "print"
+    func $print
+      typeuse
+        param i32
+  func $main
+    typeuse
+    i32.const 21
+    i32.const 21
+    i32.mul
+    call $print
+  export "main"
+    func $main

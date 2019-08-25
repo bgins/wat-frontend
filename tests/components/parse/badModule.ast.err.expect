@@ -1,0 +1,2 @@
+"tests/components/badModule.wat" (line 1, column 6):
+unexpected : A module must start with the "module" keyword or be empty, but I am seeing "type"

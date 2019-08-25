@@ -1,0 +1,2 @@
+"tests/tokens/midHighUnicodeFail.tok" (line 1, column 10):
+unexpected Invalid unicode charater "u{dfff}" in string

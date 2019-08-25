@@ -1,0 +1,13 @@
+module
+  func $eqz32
+    typeuse
+      param i32
+      result i32
+    local.get 0
+    i32.eqz
+  func $eqz64
+    typeuse
+      param i64
+      result i32
+    local.get 0
+    i64.eqz

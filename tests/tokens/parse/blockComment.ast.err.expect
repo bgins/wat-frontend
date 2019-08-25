@@ -1,0 +1,3 @@
+"tests/tokens/blockComment.tok" (line 1, column 14):
+unexpected end of input
+expecting " ", ";;", "(;" or "("

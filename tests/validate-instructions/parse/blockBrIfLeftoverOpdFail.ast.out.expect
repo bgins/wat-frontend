@@ -1,0 +1,9 @@
+module
+  func $leftoverOpd
+    typeuse
+    block $block
+      i64.const 1
+      i32.const 0
+      br_if $block
+      nop
+    drop
